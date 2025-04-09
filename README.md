@@ -38,11 +38,11 @@ A comprehensive meal planning application built with React Native and Expo, desi
 ## Getting Started
 
 ### Prerequisites
-- Node.js (v14 or higher)
+- Node.js (v16 or higher)
 - npm or yarn
-- Expo CLI
+- Expo Go app on your mobile device (for testing)
 
-### Installation
+### One-Click Setup
 
 1. Clone the repository
 ```bash
@@ -58,7 +58,12 @@ yarn install
 ```
 
 3. Set up environment variables
-Create a `.env` file in the root directory with the following variables:
+Copy the `.env.example` file to a new file named `.env` and update the values:
+```bash
+cp .env.example .env
+```
+
+Then edit the `.env` file with your actual credentials:
 ```
 EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
@@ -66,11 +71,31 @@ EXPO_PUBLIC_EDAMAM_APP_ID=your_edamam_app_id
 EXPO_PUBLIC_EDAMAM_APP_KEY=your_edamam_app_key
 ```
 
+You'll need to create accounts on [Supabase](https://supabase.com/) and [Edamam](https://developer.edamam.com/) to get these credentials.
+
 4. Start the development server
 ```bash
 npm start
-# or
-yarn start
+```
+
+5. Run on specific platforms
+```bash
+# For iOS
+npm run ios
+
+# For Android
+npm run android
+
+# For web
+npm run web
+```
+
+### Testing
+
+Run the test suite to ensure everything is working correctly:
+
+```bash
+npm test
 ```
 
 ## Project Structure
