@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,14 +6,11 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  Platform,
-  ActivityIndicator,
-  Switch
+  ActivityIndicator
 } from 'react-native';
-import { X as XIcon, Save, Tag as TagIcon, Calendar, AlertCircle } from 'lucide-react-native';
+import { X as XIcon, Save, Tag as TagIcon, Calendar } from 'lucide-react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import { saveMealPlan, type SaveMealPlanParams, getCurrentMealPlan } from '@/lib/meal-plans';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { saveMealPlan, type SaveMealPlanParams } from '@/lib/meal-plans';
 
 interface SaveMealPlanModalProps {
   recipes: {
@@ -44,36 +41,6 @@ export function SaveMealPlanModal({ recipes, onClose, onSave }: SaveMealPlanModa
   const [newTag, setNewTag] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasCurrentPlan, setHasCurrentPlan] = useState(false);
-  const [makeCurrentPlan, setMakeCurrentPlan] = useState(true);
-  const [replaceCurrent, setReplaceCurrent] = useState(false);
-  const [showStartDatePicker, setShowStartDatePicker] = useState(false);
-  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
-  const [startDate, setStartDate] = useState(new Date());
-  const [endDate, setEndDate] = useState(() => {
-    const date = new Date();
-    date.setDate(date.getDate() + 6); // Default to 7 days
-    return date;
-  });
-
-  useEffect(() => {
-    checkForCurrentPlan();
-  }, []);
-
-  const checkForCurrentPlan = async () => {
-    try {
-      const currentPlan = await getCurrentMealPlan();
-      setHasCurrentPlan(!!currentPlan);
-
-      // If there's a current plan, default to not replacing it
-      if (currentPlan) {
-        setMakeCurrentPlan(false);
-        setReplaceCurrent(false);
-      }
-    } catch (error) {
-      console.error('Error checking for current plan:', error);
-    }
-  };
 
   const handleAddTag = () => {
     if (newTag.trim() && !tags.includes(newTag.trim())) {
@@ -86,47 +53,20 @@ export function SaveMealPlanModal({ recipes, onClose, onSave }: SaveMealPlanModa
     setTags(tags.filter(tag => tag !== tagToRemove));
   };
 
-  const handleStartDateChange = (event: any, selectedDate?: Date) => {
-    setShowStartDatePicker(false);
-    if (selectedDate) {
-      setStartDate(selectedDate);
-
-      // If end date is before start date, adjust it
-      if (endDate < selectedDate) {
-        const newEndDate = new Date(selectedDate);
-        newEndDate.setDate(selectedDate.getDate() + 6); // Default to 7 days
-        setEndDate(newEndDate);
-      }
-    }
+  const getUniqueDays = (): number => {
+    // Get the number of unique day indices in the recipes
+    const uniqueDayIndices = new Set(recipes.map(recipe => recipe.day_index));
+    return uniqueDayIndices.size || 0;
   };
 
-  const handleEndDateChange = (event: any, selectedDate?: Date) => {
-    setShowEndDatePicker(false);
-    if (selectedDate) {
-      // Ensure end date is not before start date
-      if (selectedDate >= startDate) {
-        // Ensure end date is not more than 31 days after start date
-        const maxEndDate = new Date(startDate);
-        maxEndDate.setDate(startDate.getDate() + 30);
+  const getMealPlanDuration = (): number => {
+    // Calculate the actual duration based on the maximum day index
+    const uniqueDayIndices = new Set(recipes.map(recipe => recipe.day_index));
+    if (uniqueDayIndices.size === 0) return 0;
 
-        if (selectedDate <= maxEndDate) {
-          setEndDate(selectedDate);
-        } else {
-          setEndDate(maxEndDate);
-          setError('Meal plans cannot exceed 31 days');
-        }
-      } else {
-        setError('End date must be after start date');
-      }
-    }
-  };
-
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    const maxDayIndex = Math.max(...Array.from(uniqueDayIndices));
+    // The duration is maxDayIndex + 1 (since we start from day 0)
+    return maxDayIndex + 1;
   };
 
   const handleSave = async () => {
@@ -138,27 +78,11 @@ export function SaveMealPlanModal({ recipes, onClose, onSave }: SaveMealPlanModa
         throw new Error('Please enter a name for your meal plan');
       }
 
-      // Calculate the duration in days
-      const durationInDays = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-
-      // Validate the duration
-      if (durationInDays < 1) {
-        throw new Error('Meal plan must be at least 1 day long');
-      }
-
-      if (durationInDays > 31) {
-        throw new Error('Meal plan cannot exceed 31 days');
-      }
-
       const mealPlanData: SaveMealPlanParams = {
         name: name.trim(),
         description: description.trim() || undefined,
         category: category || undefined,
         tags: tags.length > 0 ? tags : undefined,
-        start_date: startDate.toISOString().split('T')[0],
-        end_date: endDate.toISOString().split('T')[0],
-        is_current: makeCurrentPlan,
-        replace_current: replaceCurrent,
         recipes: recipes.map(recipe => ({
           ...recipe,
           notes: ''
@@ -222,66 +146,25 @@ export function SaveMealPlanModal({ recipes, onClose, onSave }: SaveMealPlanModa
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Date Range</Text>
-            <View style={styles.dateContainer}>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowStartDatePicker(true)}
-              >
-                <Calendar size={16} color="#2A9D8F" />
-                <Text style={styles.dateButtonText}>{formatDate(startDate)}</Text>
-              </TouchableOpacity>
-              <Text style={styles.dateRangeSeparator}>to</Text>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowEndDatePicker(true)}
-              >
-                <Calendar size={16} color="#2A9D8F" />
-                <Text style={styles.dateButtonText}>{formatDate(endDate)}</Text>
-              </TouchableOpacity>
+            <Text style={styles.label}>Meal Plan Scheduling</Text>
+            <View style={styles.infoContainer}>
+              <Calendar size={16} color="#2A9D8F" />
+              <Text style={styles.infoText}>
+                Your meal plan will be automatically scheduled to start after your last meal plan ends.
+                If this is your first meal plan, it will start today.
+              </Text>
             </View>
-            {showStartDatePicker && (
-              <DateTimePicker
-                value={startDate}
-                mode="date"
-                display="default"
-                onChange={handleStartDateChange}
-                minimumDate={new Date()}
-              />
-            )}
-            {showEndDatePicker && (
-              <DateTimePicker
-                value={endDate}
-                mode="date"
-                display="default"
-                onChange={handleEndDateChange}
-                minimumDate={startDate}
-              />
-            )}
+            <View style={[styles.infoContainer, { marginTop: 8 }]}>
+              <Text style={styles.infoText}>
+                This meal plan contains {getUniqueDays()} unique days of meals spanning {getMealPlanDuration()} days total and will be scheduled accordingly.
+              </Text>
+            </View>
+            <View style={[styles.infoContainer, { marginTop: 8 }]}>
+              <Text style={styles.infoText}>
+                Meal plans are automatically activated based on their dates. The plan covering today's date will be your current plan.
+              </Text>
+            </View>
           </View>
-
-          {hasCurrentPlan && (
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Current Meal Plan</Text>
-              <View style={styles.switchContainer}>
-                <View style={styles.switchRow}>
-                  <Switch
-                    value={makeCurrentPlan}
-                    onValueChange={setMakeCurrentPlan}
-                    trackColor={{ false: '#E9ECEF', true: '#2A9D8F' }}
-                    thumbColor="#FFFFFF"
-                  />
-                  <Text style={styles.switchLabel}>Make this my current meal plan</Text>
-                </View>
-                {makeCurrentPlan && (
-                  <View style={styles.infoContainer}>
-                    <AlertCircle size={16} color="#F4A261" />
-                    <Text style={styles.infoText}>This will replace your current active meal plan</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          )}
 
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Category</Text>

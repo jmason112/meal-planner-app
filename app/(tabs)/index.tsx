@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { ChevronRight, Clock, Users, Bookmark, Plus, Coffee } from 'lucide-react-native';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase';
-import { getMealPlans, getCurrentMealPlan } from '@/lib/meal-plans';
+import { getMealPlans, getCurrentMealPlan, getWeekMealPlans } from '@/lib/meal-plans';
 import { getShoppingList } from '@/lib/shopping';
+import EmptyHomeState from '@/components/EmptyHomeState';
 
 export default function Home() {
   const router = useRouter();
   const [userName, setUserName] = useState('there');
   const [mealPlan, setMealPlan] = useState(null);
-  const [selectedDay, setSelectedDay] = useState(1); // Tuesday by default
+  const [weekMealPlans, setWeekMealPlans] = useState([]);
+  const [selectedDay, setSelectedDay] = useState(new Date().getDay()); // Current day by default
   const [shoppingItems, setShoppingItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -22,6 +24,17 @@ export default function Home() {
     loadMealPlan();
     loadShoppingList();
   }, []);
+
+  // Refresh data when the screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('Home screen focused - refreshing data');
+      loadUserData();
+      loadMealPlan();
+      loadShoppingList();
+      return () => {};
+    }, [])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -47,6 +60,8 @@ export default function Home() {
 
   const loadMealPlan = async () => {
     try {
+      setLoading(true);
+
       // Try to get the current meal plan first
       const currentPlan = await getCurrentMealPlan();
 
@@ -62,12 +77,23 @@ export default function Home() {
 
         if (plans.length > 0) {
           setMealPlan(plans[0]);
+        } else {
+          // If no plans found, explicitly set mealPlan to null
+          setMealPlan(null);
         }
       }
+
+      // Load all meal plans for the current week
+      const weekPlans = await getWeekMealPlans();
+      setWeekMealPlans(weekPlans);
     } catch (error) {
       console.error('Error loading meal plan:', error);
+      // Ensure states are reset on error
+      setMealPlan(null);
+      setWeekMealPlans([]);
     } finally {
       setLoading(false);
+      setRefreshing(false); // Ensure refreshing is reset
     }
   };
 
@@ -88,19 +114,71 @@ export default function Home() {
   };
 
   const getDayName = (index) => {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     return days[index];
   };
 
+  const getFormattedDate = (dayIndex) => {
+    const today = new Date();
+    const currentDayOfWeek = today.getDay();
+    const diff = dayIndex - currentDayOfWeek;
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() + diff);
+
+    return targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
   const getMealsForDay = (dayIndex) => {
-    if (!mealPlan || !mealPlan.recipes) return [];
-    return mealPlan.recipes.filter(recipe => recipe.day_index === dayIndex);
+    // Get the date for the selected day
+    const today = new Date();
+    const currentDayOfWeek = today.getDay();
+    const diff = dayIndex - currentDayOfWeek;
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() + diff);
+    const targetDateStr = targetDate.toISOString().split('T')[0];
+
+    // Collect meals from all relevant meal plans for this day
+    let allMeals = [];
+
+    weekMealPlans.forEach(plan => {
+      // Check if this plan covers the target date
+      if (plan.start_date && plan.end_date &&
+          plan.start_date <= targetDateStr &&
+          plan.end_date >= targetDateStr &&
+          plan.recipes) {
+
+        // Calculate the day index within this specific meal plan
+        const planStartDate = new Date(plan.start_date);
+        const daysSincePlanStart = Math.floor((targetDate - planStartDate) / (1000 * 60 * 60 * 24));
+
+        // Add meals for this day from this plan
+        const planMeals = plan.recipes.filter(recipe => recipe.day_index === daysSincePlanStart);
+        allMeals = [...allMeals, ...planMeals];
+      }
+    });
+
+    return allMeals;
   };
 
   const getRecentRecipes = () => {
     if (!mealPlan || !mealPlan.recipes) return [];
     return mealPlan.recipes.slice(0, 3);
   };
+
+  // Show loading indicator
+  if (loading && !refreshing) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2A9D8F" />
+        <Text style={styles.loadingText}>Loading your meal plans...</Text>
+      </View>
+    );
+  }
+
+  // Show empty state if there are no meal plans
+  if (!loading && !refreshing && (!mealPlan || !weekMealPlans.length)) {
+    return <EmptyHomeState userName={userName} />;
+  }
 
   return (
     <View style={styles.container}>
@@ -225,6 +303,7 @@ export default function Home() {
                     onPress={() => setSelectedDay(day)}
                   >
                     <Text style={[styles.dayText, selectedDay === day ? styles.activeDayText : null]}>{getDayName(day)}</Text>
+                    <Text style={[styles.dayDateText, selectedDay === day ? styles.activeDayDateText : null]}>{getFormattedDate(day)}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -442,6 +521,18 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  loadingText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 16,
+    color: '#264653',
+    marginTop: 16,
+  },
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
@@ -603,14 +694,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 16,
+    flexWrap: "wrap",
+    gap: 8,
   },
   dayButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 50,
+    height: 60,
+    borderRadius: 10,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#F8F9FA",
+    padding: 5,
   },
   activeDayButton: {
     backgroundColor: "#2A9D8F",
@@ -622,6 +716,16 @@ const styles = StyleSheet.create({
   },
   activeDayText: {
     color: "#FFFFFF",
+  },
+  dayDateText: {
+    fontSize: 10,
+    fontFamily: "Inter-Regular",
+    color: "#ADB5BD",
+    marginTop: 4,
+  },
+  activeDayDateText: {
+    color: "#FFFFFF",
+    opacity: 0.8,
   },
   mealPlanCard: {
     backgroundColor: "#FFFFFF",

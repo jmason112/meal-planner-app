@@ -68,7 +68,8 @@ export function MealPlanResults({ days, onClose, onAddToShoppingList }: MealPlan
 
   const handleSaveComplete = () => {
     setShowSaveModal(false);
-    // Optionally show a success message or navigate somewhere
+    // Navigate back to the meal planner list
+    router.push('/meal-planner');
   };
 
   const handleAddToInstacart = () => {

@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, RefreshControl } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Calendar, Search, Plus, Star, Tag as TagIcon, CircleAlert as AlertCircle, MoreVertical, Edit } from 'lucide-react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, RefreshControl, ActivityIndicator } from 'react-native';
+import EmptyMealPlanState from '@/components/EmptyMealPlanState';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { Calendar, Search, Plus, Star, Tag as TagIcon, CircleAlert as AlertCircle, Edit } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { getMealPlans, type MealPlan } from '@/lib/meal-plans';
 
 export default function MealPlanner() {
   const router = useRouter();
   const [mealPlans, setMealPlans] = useState<MealPlan[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -17,12 +18,42 @@ export default function MealPlanner() {
   const loadMealPlans = async () => {
     try {
       setError(null);
-      // Sort by start_date descending to show newest plans first
+      // Get all meal plans
       const plans = await getMealPlans({
-        sort_by: 'start_date',
-        sort_direction: 'desc'
+        status: 'active'
       });
-      setMealPlans(plans);
+
+      // Sort plans: current plan first, then by start_date ascending for future plans
+      const today = new Date().toISOString().split('T')[0];
+
+      const sortedPlans = [...plans].sort((a, b) => {
+        // Current plan always comes first
+        if (a.is_current) return -1;
+        if (b.is_current) return 1;
+
+        // For non-current plans, sort by start_date
+        // Plans that start in the future come before plans that are in the past
+        const aStartDate = a.start_date || '';
+        const bStartDate = b.start_date || '';
+
+        // Future plans (start date >= today)
+        const aIsFuture = aStartDate >= today;
+        const bIsFuture = bStartDate >= today;
+
+        if (aIsFuture && !bIsFuture) return -1; // Future plans before past plans
+        if (!aIsFuture && bIsFuture) return 1; // Past plans after future plans
+
+        // Both future or both past, sort by start date
+        if (aIsFuture && bIsFuture) {
+          // For future plans, sort by start date ascending (closest future date first)
+          return aStartDate.localeCompare(bStartDate);
+        } else {
+          // For past plans, sort by start date descending (most recent past date first)
+          return bStartDate.localeCompare(aStartDate);
+        }
+      });
+
+      setMealPlans(sortedPlans);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load meal plans');
     } finally {
@@ -35,10 +66,100 @@ export default function MealPlanner() {
     loadMealPlans();
   }, []);
 
+  // Refresh meal plans when the screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('Meal planner screen focused - refreshing meal plans');
+      loadMealPlans();
+      return () => {};
+    }, [])
+  );
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     loadMealPlans();
   }, []);
+
+  const getMealPlanCardStyle = (plan: MealPlan, index: number) => {
+    if (plan.is_current) {
+      return styles.currentMealPlanCard;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (plan.start_date && new Date(plan.start_date) > today) {
+      if (index === 1) {
+        return styles.nextMealPlanCard;
+      } else if (index === 2) {
+        return styles.upcomingMealPlanCard;
+      } else {
+        return styles.futureMealPlanCard;
+      }
+    }
+
+    if (plan.end_date && new Date(plan.end_date) < today) {
+      return styles.pastMealPlanCard;
+    }
+
+    return null;
+  };
+
+  const renderPlanStatusTag = (plan: MealPlan, index: number) => {
+    // Current plan
+    if (plan.is_current) {
+      return (
+        <View style={styles.currentTag}>
+          <Text style={styles.currentTagText}>Current</Text>
+        </View>
+      );
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Future plans
+    if (plan.start_date && new Date(plan.start_date) > today) {
+      // First future plan is "Next"
+      if (index === 1) {
+        return (
+          <View style={styles.nextTag}>
+            <Text style={styles.nextTagText}>Next</Text>
+          </View>
+        );
+      }
+      // Second future plan is "Upcoming"
+      else if (index === 2) {
+        return (
+          <View style={styles.upcomingTag}>
+            <Text style={styles.upcomingTagText}>Upcoming</Text>
+          </View>
+        );
+      }
+      // Other future plans show the start date
+      else {
+        const startDate = new Date(plan.start_date);
+        const formattedDate = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return (
+          <View style={styles.futureTag}>
+            <Text style={styles.futureTagText}>Starts {formattedDate}</Text>
+          </View>
+        );
+      }
+    }
+
+    // Past plans
+    if (plan.end_date && new Date(plan.end_date) < today) {
+      return (
+        <View style={styles.pastTag}>
+          <Text style={styles.pastTagText}>Past</Text>
+        </View>
+      );
+    }
+
+    // Default case (shouldn't happen, but just in case)
+    return null;
+  };
 
   const filteredMealPlans = mealPlans.filter(plan => {
     const matchesSearch = searchQuery
@@ -71,6 +192,20 @@ export default function MealPlanner() {
         </View>
       </View>
     );
+  }
+
+  if (isLoading && !refreshing) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2A9D8F" />
+        <Text style={styles.loadingText}>Loading meal plans...</Text>
+      </View>
+    );
+  }
+
+  // Show empty state if there are no meal plans
+  if (!isLoading && !refreshing && filteredMealPlans.length === 0 && !searchQuery && !selectedCategory) {
+    return <EmptyMealPlanState />;
   }
 
   return (
@@ -111,7 +246,7 @@ export default function MealPlanner() {
               showsHorizontalScrollIndicator={false}
               style={styles.categoriesContainer}
             >
-              {categories.map((category, index) => (
+              {categories.map((category) => (
                 <TouchableOpacity
                   key={category}
                   style={[
@@ -135,11 +270,35 @@ export default function MealPlanner() {
         )}
 
         <View style={styles.mealPlansGrid}>
-          {filteredMealPlans.map((plan, index) => (
+          {filteredMealPlans.length === 0 ? (
+            <Animated.View
+              style={styles.noResultsContainer}
+              entering={FadeInDown.delay(400)}
+            >
+              <AlertCircle size={48} color="#ADB5BD" />
+              <Text style={styles.noResultsText}>
+                {searchQuery ?
+                  `No meal plans found matching "${searchQuery}"` :
+                  selectedCategory ?
+                    `No meal plans found in category "${selectedCategory}"` :
+                    'No meal plans found'}
+              </Text>
+              <TouchableOpacity
+                style={styles.clearFiltersButton}
+                onPress={() => {
+                  setSearchQuery('');
+                  setSelectedCategory(null);
+                }}
+              >
+                <Text style={styles.clearFiltersButtonText}>Clear Filters</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          ) : (
+            filteredMealPlans.map((plan, index) => (
             <Animated.View
               key={plan.id}
               entering={FadeInDown.delay(400 + index * 100)}
-              style={[styles.mealPlanCard, plan.is_current && styles.currentMealPlanCard]}
+              style={[styles.mealPlanCard, getMealPlanCardStyle(plan, index)]}
             >
               <TouchableOpacity
                 style={styles.editButton}
@@ -160,11 +319,7 @@ export default function MealPlanner() {
                 <View style={styles.mealPlanHeader}>
                   <Text style={styles.mealPlanName}>{plan.name}</Text>
                   <View style={styles.mealPlanTags}>
-                    {plan.is_current && (
-                      <View style={styles.currentTag}>
-                        <Text style={styles.currentTagText}>Current</Text>
-                      </View>
-                    )}
+                    {renderPlanStatusTag(plan, index)}
                     {plan.category && (
                       <View style={styles.categoryTag}>
                         <TagIcon size={12} color="#2A9D8F" />
@@ -195,7 +350,7 @@ export default function MealPlanner() {
                 </View>
               </TouchableOpacity>
             </Animated.View>
-          ))}
+          )))}
         </View>
       </ScrollView>
 
@@ -292,7 +447,28 @@ const styles = StyleSheet.create({
   currentMealPlanCard: {
     borderWidth: 2,
     borderColor: '#2A9D8F',
-    backgroundColor: '#F0F9F8',
+    backgroundColor: '#F0F9F8', // Light teal background
+  },
+  nextMealPlanCard: {
+    borderWidth: 2,
+    borderColor: '#F4A261', // Orange border
+    backgroundColor: '#FDF6F0', // Light orange background
+  },
+  upcomingMealPlanCard: {
+    borderWidth: 2,
+    borderColor: '#E9C46A', // Yellow border
+    backgroundColor: '#FDF9E9', // Light yellow background
+  },
+  futureMealPlanCard: {
+    borderWidth: 2,
+    borderColor: '#A8DADC', // Light blue border
+    backgroundColor: '#F0F7F8', // Very light blue background
+  },
+  pastMealPlanCard: {
+    borderWidth: 1,
+    borderColor: '#ADB5BD', // Gray border
+    backgroundColor: '#F8F9FA', // Light gray background
+    opacity: 0.8, // Slightly faded
   },
   mealPlanContent: {
     padding: 16,
@@ -330,6 +506,50 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   currentTagText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 12,
+    color: '#FFFFFF',
+  },
+  nextTag: {
+    backgroundColor: '#F4A261', // Orange color for next plan
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  nextTagText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 12,
+    color: '#FFFFFF',
+  },
+  upcomingTag: {
+    backgroundColor: '#E9C46A', // Yellow color for upcoming plan
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  upcomingTagText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 12,
+    color: '#FFFFFF',
+  },
+  futureTag: {
+    backgroundColor: '#A8DADC', // Light blue for future plans
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  futureTagText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 12,
+    color: '#264653',
+  },
+  pastTag: {
+    backgroundColor: '#ADB5BD', // Gray for past plans
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  pastTagText: {
     fontFamily: 'Inter-Medium',
     fontSize: 12,
     color: '#FFFFFF',
@@ -424,5 +644,42 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-SemiBold',
     fontSize: 16,
     color: '#fff',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  loadingText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 16,
+    color: '#264653',
+    marginTop: 16,
+  },
+  noResultsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    marginTop: 24,
+  },
+  noResultsText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 16,
+    color: '#6C757D',
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 24,
+  },
+  clearFiltersButton: {
+    backgroundColor: '#E9ECEF',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  clearFiltersButtonText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 14,
+    color: '#495057',
   },
 });
