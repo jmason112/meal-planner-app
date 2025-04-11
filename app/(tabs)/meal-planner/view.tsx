@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, ActivityIndicator, Image } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Edit, Star, Tag as TagIcon, CircleAlert as AlertCircle, Clock, Users, ChevronRight, ShoppingBag } from 'lucide-react-native';
+import { ArrowLeft, Edit, Star, Tag as TagIcon, CircleAlert as AlertCircle, Clock, Users, ChevronRight, ShoppingBag, ChefHat, Check } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { getMealPlans, toggleFavorite, setCurrentMealPlan, type MealPlan } from '@/lib/meal-plans';
+import { getMealPlans, toggleFavorite, setCurrentMealPlan, markMealAsCooked, markMealAsNotCooked, type MealPlan } from '@/lib/meal-plans';
 import { InstacartModal } from '@/components/InstacartModal';
 import { createShoppingList, ShoppingListEntry, getRecipeDetails } from '@/lib/edamam';
-import { addToShoppingList, ShoppingItem } from '@/lib/shopping';
+import { addToShoppingList, ShoppingItem, toggleItemChecked as toggleItemCheckedApi } from '@/lib/shopping';
+import { checkAndUpdateAchievements } from '@/lib/progress';
+import { supabase } from '@/lib/supabase';
 
 export default function ViewMealPlan() {
   const router = useRouter();
@@ -16,6 +18,8 @@ export default function ViewMealPlan() {
   const [error, setError] = useState<string | null>(null);
   const [showInstacartModal, setShowInstacartModal] = useState(false);
   const [isCreatingShoppingList, setIsCreatingShoppingList] = useState(false);
+  const [markingAsCooked, setMarkingAsCooked] = useState<string | null>(null);
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
 
   useEffect(() => {
     loadMealPlan();
@@ -73,6 +77,53 @@ export default function ViewMealPlan() {
     router.push(`/recipe/${recipeId}`);
   };
 
+  const handleToggleCooked = async (recipe: any) => {
+    if (markingAsCooked) return;
+
+    try {
+      setMarkingAsCooked(recipe.id);
+
+      if (recipe.is_cooked) {
+        // Mark as not cooked
+        await markMealAsNotCooked(
+          mealPlan!.id,
+          recipe.recipe_id,
+          recipe.day_index,
+          recipe.meal_type
+        );
+      } else {
+        // Mark as cooked
+        await markMealAsCooked(
+          mealPlan!.id,
+          recipe.recipe_id,
+          recipe.day_index,
+          recipe.meal_type
+        );
+      }
+
+      // Update local state
+      setMealPlan(prev => {
+        if (!prev) return null;
+
+        return {
+          ...prev,
+          recipes: prev.recipes?.map(r =>
+            r.id === recipe.id
+              ? { ...r, is_cooked: !r.is_cooked }
+              : r
+          )
+        };
+      });
+
+      // Update achievements
+      await checkAndUpdateAchievements();
+    } catch (err) {
+      console.error('Error toggling cooked status:', err);
+    } finally {
+      setMarkingAsCooked(null);
+    }
+  };
+
   const handleEditMealPlan = () => {
     router.push(`/meal-planner/edit?id=${id}`);
   };
@@ -81,7 +132,7 @@ export default function ViewMealPlan() {
     setShowInstacartModal(true);
   };
 
-  const createInstacartList = async (): Promise<string | undefined> => {
+  const createInstacartList = async (): Promise<{ url?: string; sentItems?: ShoppingItem[] }> => {
     if (!mealPlan || !mealPlan.recipes || mealPlan.recipes.length === 0) {
       throw new Error('No recipes found in this meal plan');
     }
@@ -97,9 +148,10 @@ export default function ViewMealPlan() {
       }));
 
       // Add to local shopping list
+      let shoppingItems: ShoppingItem[] = [];
       try {
         // Extract all ingredients from the meal plan
-        const shoppingItems = [];
+        const tempItems = [];
 
         // For each recipe in the meal plan, add its ingredients to the shopping list
         for (const recipe of mealPlan.recipes) {
@@ -117,17 +169,19 @@ export default function ViewMealPlan() {
               checked: false
             }));
 
-            shoppingItems.push(...ingredients);
+            tempItems.push(...ingredients);
           } catch (error) {
             console.error(`Error getting ingredients for ${recipe.recipe_data.title}:`, error);
           }
         }
 
         // Add all items to the shopping list
-        if (shoppingItems.length > 0) {
-          console.log('Adding to local shopping list:', shoppingItems.length, 'items');
-          await addToShoppingList(shoppingItems);
+        if (tempItems.length > 0) {
+          console.log('Adding to local shopping list:', tempItems.length, 'items');
+          await addToShoppingList(tempItems);
           console.log('Successfully added to local shopping list');
+          shoppingItems = tempItems;
+          setShoppingItems(tempItems); // Update the state with the shopping items
         }
       } catch (err) {
         console.error('Error adding to local shopping list:', err);
@@ -144,12 +198,69 @@ export default function ViewMealPlan() {
         console.warn('No shopping cart URL found in the response');
       }
 
-      return cartUrl;
+      return {
+        url: cartUrl,
+        sentItems: shoppingItems
+      };
     } catch (error) {
       console.error('Error creating Instacart shopping list:', error);
       throw error;
     } finally {
       setIsCreatingShoppingList(false);
+    }
+  };
+
+  const markItemsAsChecked = async (itemIds: string[]) => {
+    try {
+      console.log('Marking items as checked:', itemIds.length);
+
+      // Get the current shopping list to find matching items
+      const { data: currentShoppingList, error: listError } = await supabase
+        .from('shopping_list_items')
+        .select('id, name, recipe, recipe_id')
+        .eq('checked', false);
+
+      if (listError) {
+        console.error('Error fetching shopping list:', listError);
+        return;
+      }
+
+      if (!currentShoppingList || currentShoppingList.length === 0) {
+        console.log('No items found in shopping list');
+        return;
+      }
+
+      // Find items in the shopping list that match the sent items
+      // We'll match by recipe_id and name since the IDs won't match
+      const sentItems = itemIds.map(id => {
+        // Find the sent item in the shopping items array
+        const sentItem = shoppingItems.find(item => item.id === id);
+        return sentItem;
+      }).filter(Boolean);
+
+      // Find matching items in the current shopping list
+      const itemsToCheck = [];
+      for (const sentItem of sentItems) {
+        // Find items in the shopping list with the same recipe_id and name
+        const matchingItems = currentShoppingList.filter(item =>
+          item.recipe_id === sentItem.recipe_id &&
+          item.name.toLowerCase() === sentItem.name.toLowerCase()
+        );
+
+        itemsToCheck.push(...matchingItems.map(item => item.id));
+      }
+
+      console.log(`Found ${itemsToCheck.length} matching items in shopping list`);
+
+      // Mark each matching item as checked
+      for (const id of itemsToCheck) {
+        await toggleItemCheckedApi(id);
+      }
+
+      return;
+    } catch (error) {
+      console.error('Error marking items as checked:', error);
+      throw error;
     }
   };
 
@@ -281,40 +392,54 @@ export default function ViewMealPlan() {
             <View key={dayIndex} style={styles.dayContainer}>
               <Text style={styles.dayTitle}>Day {parseInt(dayIndex) + 1}</Text>
               {recipes?.map((recipe) => (
-                <Animated.View
-                  key={recipe.id}
-                  entering={FadeInDown.delay(300)}
-                  style={styles.mealCard}
-                >
-                  <TouchableOpacity
-                    style={styles.mealCardContent}
-                    onPress={() => handleViewRecipe(recipe.recipe_id)}
+                <View key={recipe.id} style={styles.mealCardContainer}>
+                  <Animated.View
+                    entering={FadeInDown.delay(300)}
+                    style={styles.mealCard}
                   >
-                    <Image
-                      source={{ uri: recipe.recipe_data.image }}
-                      style={styles.mealImage}
-                    />
-                    <View style={styles.mealContent}>
-                      <View style={styles.mealTypeContainer}>
-                        <Text style={styles.mealType}>
-                          {recipe.meal_type.charAt(0).toUpperCase() + recipe.meal_type.slice(1)}
-                        </Text>
-                      </View>
-                      <Text style={styles.mealTitle}>{recipe.recipe_data.title}</Text>
-                      <View style={styles.mealMeta}>
-                        <View style={styles.metaItem}>
-                          <Clock size={14} color="#666" />
-                          <Text style={styles.metaText}>{recipe.recipe_data.time}</Text>
+                    <TouchableOpacity
+                      style={styles.mealCardContent}
+                      onPress={() => handleViewRecipe(recipe.recipe_id)}
+                    >
+                      <Image
+                        source={{ uri: recipe.recipe_data.image }}
+                        style={styles.mealImage}
+                      />
+                      <View style={styles.mealContent}>
+                        <View style={styles.mealTypeContainer}>
+                          <Text style={styles.mealType}>
+                            {recipe.meal_type.charAt(0).toUpperCase() + recipe.meal_type.slice(1)}
+                          </Text>
                         </View>
-                        <View style={styles.metaItem}>
-                          <Users size={14} color="#666" />
-                          <Text style={styles.metaText}>{recipe.recipe_data.servings} servings</Text>
+                        <Text style={styles.mealTitle}>{recipe.recipe_data.title}</Text>
+                        <View style={styles.mealMeta}>
+                          <View style={styles.metaItem}>
+                            <Clock size={14} color="#666" />
+                            <Text style={styles.metaText}>{recipe.recipe_data.time}</Text>
+                          </View>
+                          <View style={styles.metaItem}>
+                            <Users size={14} color="#666" />
+                            <Text style={styles.metaText}>{recipe.recipe_data.servings} servings</Text>
+                          </View>
                         </View>
                       </View>
-                    </View>
-                    <ChevronRight size={20} color="#666" style={styles.chevron} />
+                      <ChevronRight size={20} color="#666" style={styles.chevron} />
+                    </TouchableOpacity>
+                  </Animated.View>
+                  <TouchableOpacity
+                    style={[styles.cookedButton, recipe.is_cooked && styles.cookedButtonActive]}
+                    onPress={() => handleToggleCooked(recipe)}
+                    disabled={markingAsCooked !== null}
+                  >
+                    {markingAsCooked === recipe.id ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : recipe.is_cooked ? (
+                      <Check size={16} color="#FFFFFF" />
+                    ) : (
+                      <ChefHat size={16} color="#264653" />
+                    )}
                   </TouchableOpacity>
-                </Animated.View>
+                </View>
               ))}
             </View>
           ))}
@@ -338,6 +463,7 @@ export default function ViewMealPlan() {
         visible={showInstacartModal}
         onClose={() => setShowInstacartModal(false)}
         onConfirm={createInstacartList}
+        onMarkItemsAsChecked={markItemsAsChecked}
         isLoading={isCreatingShoppingList}
       />
     </View>
@@ -528,10 +654,15 @@ const styles = StyleSheet.create({
     color: '#264653',
     marginBottom: 12,
   },
+  mealCardContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   mealCard: {
+    flex: 1,
     backgroundColor: '#fff',
     borderRadius: 12,
-    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -541,6 +672,23 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
     overflow: 'hidden',
+  },
+  cookedButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F0F9F8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  cookedButtonActive: {
+    backgroundColor: '#2A9D8F',
   },
   mealCardContent: {
     flexDirection: 'row',

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Settings, Save, RotateCcw, ChevronLeft } from 'lucide-react-native';
+import { Settings, Save, RotateCcw, ChevronLeft, ChevronRight, Award } from 'lucide-react-native';
 import Animated, { FadeInDown, FadeIn, Layout } from 'react-native-reanimated';
 import { getUserPreferences, saveUserPreferences, resetPreferences, type UserPreferences } from '@/lib/preferences';
 
@@ -33,7 +33,7 @@ export default function PreferencesScreen() {
 
   const handleSave = async () => {
     if (!preferences) return;
-    
+
     try {
       setLoading(true);
       await saveUserPreferences(preferences);
@@ -60,7 +60,7 @@ export default function PreferencesScreen() {
   if (!preferences) {
     return (
       <View style={styles.container}>
-        <Animated.View 
+        <Animated.View
           entering={FadeIn}
           style={styles.loadingContainer}
         >
@@ -72,7 +72,7 @@ export default function PreferencesScreen() {
 
   return (
     <View style={styles.container}>
-      <Animated.View 
+      <Animated.View
         entering={FadeInDown.delay(100)}
         style={styles.header}
       >
@@ -83,7 +83,7 @@ export default function PreferencesScreen() {
           <ChevronLeft size={24} color="#264653" />
         </TouchableOpacity>
         <Text style={styles.title}>Preferences</Text>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.resetButton}
           onPress={handleReset}
         >
@@ -93,7 +93,7 @@ export default function PreferencesScreen() {
       </Animated.View>
 
       {error && (
-        <Animated.View 
+        <Animated.View
           entering={FadeInDown}
           style={styles.errorContainer}
         >
@@ -101,11 +101,11 @@ export default function PreferencesScreen() {
         </Animated.View>
       )}
 
-      <ScrollView 
+      <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Animated.View 
+        <Animated.View
           entering={FadeInDown.delay(200)}
           layout={Layout.springify()}
         >
@@ -214,7 +214,7 @@ export default function PreferencesScreen() {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Servings</Text>
-            <Animated.View 
+            <Animated.View
               entering={FadeInDown.delay(500)}
               style={styles.preferenceCard}
             >
@@ -241,6 +241,25 @@ export default function PreferencesScreen() {
                   <Text style={styles.servingButtonText}>+</Text>
                 </TouchableOpacity>
               </View>
+            </Animated.View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Progress Tracking</Text>
+            <Animated.View
+              entering={FadeInDown.delay(600)}
+              style={styles.preferenceCard}
+            >
+              <TouchableOpacity
+                style={styles.navigationItem}
+                onPress={() => router.push('/progress-preferences')}
+              >
+                <View style={styles.navigationItemContent}>
+                  <Award size={20} color="#2A9D8F" />
+                  <Text style={styles.navigationItemText}>Progress Tracking Settings</Text>
+                </View>
+                <ChevronRight size={20} color="#ADB5BD" />
+              </TouchableOpacity>
             </Animated.View>
           </View>
 
@@ -348,7 +367,22 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Regular',
     fontSize: 14,
     color: '#666',
-    marginLeft: 4,
+  },
+  navigationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+  },
+  navigationItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  navigationItemText: {
+    fontFamily: 'Inter-Regular',
+    fontSize: 16,
+    color: '#264653',
+    marginLeft: 12,
   },
   errorContainer: {
     backgroundColor: '#FFE3E3',

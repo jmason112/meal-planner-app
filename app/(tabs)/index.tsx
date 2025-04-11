@@ -2,12 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { ChevronRight, Clock, Users, Bookmark, Plus, Coffee } from 'lucide-react-native';
+import { ChevronRight, Clock, Users, Bookmark, Plus, Coffee, Award, Trophy } from 'lucide-react-native';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase';
 import { getMealPlans, getCurrentMealPlan, getWeekMealPlans } from '@/lib/meal-plans';
 import { getShoppingList } from '@/lib/shopping';
+import { checkAndUpdateAchievements } from '@/lib/progress';
 import EmptyHomeState from '@/components/EmptyHomeState';
+import DailyProgress from '@/components/DailyProgress';
+import ProgressStats from '@/components/ProgressStats';
 
 export default function Home() {
   const router = useRouter();
@@ -18,11 +21,13 @@ export default function Home() {
   const [shoppingItems, setShoppingItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
     loadUserData();
     loadMealPlan();
     loadShoppingList();
+    checkAndUpdateAchievements().catch(err => console.error('Error checking achievements:', err));
   }, []);
 
   // Refresh data when the screen comes into focus
@@ -32,6 +37,8 @@ export default function Home() {
       loadUserData();
       loadMealPlan();
       loadShoppingList();
+      checkAndUpdateAchievements().catch(err => console.error('Error checking achievements:', err));
+      setRefreshTrigger(prev => prev + 1);
       return () => {};
     }, [])
   );
@@ -41,10 +48,14 @@ export default function Home() {
     Promise.all([
       loadUserData(),
       loadMealPlan(),
-      loadShoppingList()
+      loadShoppingList(),
+      checkAndUpdateAchievements()
     ])
       .catch(error => console.error('Error refreshing data:', error))
-      .finally(() => setRefreshing(false));
+      .finally(() => {
+        setRefreshing(false);
+        setRefreshTrigger(prev => prev + 1);
+      });
   }, []);
 
   const loadUserData = async () => {
@@ -214,34 +225,23 @@ export default function Home() {
         <Animated.View key={`progress-${refreshing}`} entering={FadeInDown.delay(200)} style={styles.progressContainer}>
           <Text style={styles.sectionTitle}>Today's Progress</Text>
           <View style={styles.progressCard}>
-            <View style={styles.mealProgress}>
-              <View style={styles.mealCircle}>
-                <View style={[styles.mealCircleFill, { height: "75%" }]} />
-              </View>
-              <View style={styles.mealInfo}>
-                <Text style={styles.mealTitle}>Breakfast</Text>
-                <Text style={styles.mealStatus}>Completed</Text>
-              </View>
-            </View>
-            <View style={styles.mealProgress}>
-              <View style={styles.mealCircle}>
-                <View style={[styles.mealCircleFill, { height: "0%" }]} />
-              </View>
-              <View style={styles.mealInfo}>
-                <Text style={styles.mealTitle}>Lunch</Text>
-                <Text style={styles.mealStatus}>Upcoming • 12:30 PM</Text>
-              </View>
-            </View>
-            <View style={styles.mealProgress}>
-              <View style={styles.mealCircle}>
-                <View style={[styles.mealCircleFill, { height: "0%" }]} />
-              </View>
-              <View style={styles.mealInfo}>
-                <Text style={styles.mealTitle}>Dinner</Text>
-                <Text style={styles.mealStatus}>Upcoming • 7:00 PM</Text>
-              </View>
-            </View>
+            <DailyProgress
+              refreshTrigger={refreshTrigger}
+              onUpdate={() => setRefreshTrigger(prev => prev + 1)}
+            />
           </View>
+        </Animated.View>
+
+        {/* Progress Stats Section */}
+        <Animated.View key={`stats-${refreshing}`} entering={FadeInDown.delay(250)} style={styles.statsContainer}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Your Stats</Text>
+            <TouchableOpacity style={styles.viewAllButton} onPress={() => router.push('/profile/achievements')}>
+              <Text style={styles.viewAllText}>View all</Text>
+              <ChevronRight size={16} color="#2A9D8F" />
+            </TouchableOpacity>
+          </View>
+          <ProgressStats refreshTrigger={refreshTrigger} />
         </Animated.View>
 
         {/* Recent Recipes */}
@@ -594,36 +594,8 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
-  mealProgress: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  mealCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#2A9D8F",
-    overflow: "hidden",
-    justifyContent: "flex-end",
-  },
-  mealCircleFill: {
-    width: "100%",
-    backgroundColor: "#2A9D8F",
-  },
-  mealInfo: {
-    marginLeft: 12,
-  },
-  mealTitle: {
-    fontSize: 14,
-    fontFamily: "Inter-SemiBold",
-    color: "#264653",
-  },
-  mealStatus: {
-    fontSize: 12,
-    fontFamily: "Inter-Regular",
-    color: "#ADB5BD",
+  statsContainer: {
+    marginTop: 24,
   },
   recipesContainer: {
     marginTop: 24,

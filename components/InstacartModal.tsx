@@ -1,26 +1,50 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator, Linking, Platform } from 'react-native';
-import { X, ShoppingBag, ExternalLink } from 'lucide-react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator, Linking, Platform, ScrollView } from 'react-native';
+import { X, ShoppingBag, ExternalLink, Check, AlertCircle, CheckCircle2 } from 'lucide-react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import { ShoppingItem } from '@/lib/shopping';
 
 interface InstacartModalProps {
   visible: boolean;
   onClose: () => void;
-  onConfirm: () => Promise<string | undefined>;
+  onConfirm: () => Promise<{ url?: string; sentItems?: ShoppingItem[] }>;
+  onMarkItemsAsChecked?: (itemIds: string[]) => Promise<void>;
+  shoppingItems?: ShoppingItem[];
   isLoading: boolean;
 }
 
-export function InstacartModal({ visible, onClose, onConfirm, isLoading }: InstacartModalProps) {
+export function InstacartModal({ visible, onClose, onConfirm, onMarkItemsAsChecked, shoppingItems = [], isLoading }: InstacartModalProps) {
   const [instacartUrl, setInstacartUrl] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [sentItems, setSentItems] = useState<ShoppingItem[]>([]);
+  const [markingAsChecked, setMarkingAsChecked] = useState(false);
 
   const handleConfirm = async () => {
     try {
       setError(null);
-      const url = await onConfirm();
-      setInstacartUrl(url);
+      const result = await onConfirm();
+      setInstacartUrl(result.url);
+      if (result.sentItems && result.sentItems.length > 0) {
+        setSentItems(result.sentItems);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create shopping list');
+    }
+  };
+
+  const handleMarkAsChecked = async () => {
+    if (!onMarkItemsAsChecked || sentItems.length === 0) return;
+
+    try {
+      setMarkingAsChecked(true);
+      const itemIds = sentItems.map(item => item.id);
+      await onMarkItemsAsChecked(itemIds);
+      setMarkingAsChecked(false);
+      onClose(); // Close the modal after marking items as checked
+    } catch (err) {
+      console.error('Error marking items as checked:', err);
+      setError(err instanceof Error ? err.message : 'Failed to mark items as checked');
+      setMarkingAsChecked(false);
     }
   };
 
@@ -45,6 +69,7 @@ export function InstacartModal({ visible, onClose, onConfirm, isLoading }: Insta
   const resetModal = () => {
     setInstacartUrl(undefined);
     setError(null);
+    setSentItems([]);
     onClose();
   };
 
@@ -89,10 +114,52 @@ export function InstacartModal({ visible, onClose, onConfirm, isLoading }: Insta
                 <Text style={styles.successText}>
                   Your shopping list has been created in Instacart! Click below to complete your order.
                 </Text>
+
+                {sentItems.length > 0 && (
+                  <View style={styles.sentItemsContainer}>
+                    <View style={styles.sentItemsHeader}>
+                      <Text style={styles.sentItemsTitle}>Items sent to Instacart ({sentItems.length})</Text>
+                      {onMarkItemsAsChecked && (
+                        <TouchableOpacity
+                          style={styles.markAllButton}
+                          onPress={handleMarkAsChecked}
+                          disabled={markingAsChecked}
+                        >
+                          {markingAsChecked ? (
+                            <ActivityIndicator size="small" color="#2A9D8F" />
+                          ) : (
+                            <>
+                              <CheckCircle2 size={16} color="#2A9D8F" />
+                              <Text style={styles.markAllButtonText}>Mark all as checked</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    <ScrollView style={styles.sentItemsList} contentContainerStyle={styles.sentItemsListContent}>
+                      {sentItems.map((item) => (
+                        <View key={item.id} style={styles.sentItem}>
+                          <Check size={16} color="#2A9D8F" />
+                          <Text style={styles.sentItemText}>{item.name}</Text>
+                          {item.quantity && (
+                            <Text style={styles.sentItemQuantity}>{item.quantity}</Text>
+                          )}
+                        </View>
+                      ))}
+                    </ScrollView>
+
+                    <Text style={styles.sentItemsNote}>
+                      Note: Some items may not appear in Instacart due to product availability or matching issues.
+                    </Text>
+                  </View>
+                )}
+
                 <View style={styles.instacartInfo}>
                   <ShoppingBag size={20} color="#FF8200" />
                   <Text style={styles.instacartText}>You'll be redirected to Instacart to review and checkout</Text>
                 </View>
+
                 <View style={styles.buttonGroup}>
                   <TouchableOpacity
                     style={styles.orderButton}
@@ -297,5 +364,67 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  sentItemsContainer: {
+    width: '100%',
+    marginVertical: 16,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    padding: 12,
+  },
+  sentItemsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sentItemsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#264653',
+  },
+  markAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5F3',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+  },
+  markAllButtonText: {
+    fontSize: 12,
+    color: '#2A9D8F',
+    marginLeft: 4,
+  },
+  sentItemsList: {
+    maxHeight: 200,
+  },
+  sentItemsListContent: {
+    paddingVertical: 4,
+  },
+  sentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E9ECEF',
+  },
+  sentItemText: {
+    fontSize: 14,
+    color: '#333',
+    marginLeft: 8,
+    flex: 1,
+  },
+  sentItemQuantity: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 8,
+  },
+  sentItemsNote: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 12,
+    textAlign: 'center',
   },
 });

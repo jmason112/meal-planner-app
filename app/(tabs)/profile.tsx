@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Settings, ChevronRight, LogOut } from 'lucide-react-native';
+import { Settings, ChevronRight, LogOut, Award, Trophy } from 'lucide-react-native';
 import { signOut } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 
@@ -11,10 +11,10 @@ export default function Profile() {
     try {
       // First clear the Supabase session
       await supabase.auth.signOut();
-      
+
       // Then clear any local auth state
       await signOut();
-      
+
       // Finally, redirect to the welcome screen
       router.replace('/(onboarding)');
     } catch (error) {
@@ -28,9 +28,24 @@ export default function Profile() {
 
       <ScrollView style={styles.content}>
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Progress & Rewards</Text>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => router.push('/profile/achievements')}
+          >
+            <View style={styles.menuItemContent}>
+              <Award size={20} color="#F4A261" />
+              <Text style={styles.menuItemText}>Achievements & Rewards</Text>
+            </View>
+            <ChevronRight size={20} color="#ADB5BD" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Settings</Text>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.menuItem}
             onPress={() => router.push('/(settings)/preferences')}
           >
@@ -43,7 +58,7 @@ export default function Profile() {
         </View>
 
         <View style={styles.section}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.signOutButton}
             onPress={handleSignOut}
           >

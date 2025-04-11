@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
-import { ShoppingBag, Check, Trash2, ExternalLink, Trash } from 'lucide-react-native';
+import { ShoppingBag, Check, Trash2, ExternalLink, Trash, AlertCircle } from 'lucide-react-native';
 import { getShoppingList, ShoppingItem, removeFromShoppingList, clearShoppingList, toggleItemChecked as toggleItemCheckedApi } from '@/lib/shopping';
-import { GroceryServiceSelector } from '@/components/GroceryServiceSelector';
+import { createShoppingList, ShoppingListEntry } from '@/lib/edamam';
+import { InstacartModal } from '@/components/InstacartModal';
 import { ConfirmationDialog } from '@/components/ConfirmationDialog';
 
 interface GroupedItems {
@@ -15,8 +16,9 @@ export default function Shopping() {
   const navigation = useNavigation();
   const [items, setItems] = useState<ShoppingItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showGrocerySelector, setShowGrocerySelector] = useState(false);
+  const [showInstacartModal, setShowInstacartModal] = useState(false);
   const [showClearAllConfirmation, setShowClearAllConfirmation] = useState(false);
+  const [isCreatingShoppingList, setIsCreatingShoppingList] = useState(false);
 
   useEffect(() => {
     loadShoppingList();
@@ -99,8 +101,81 @@ export default function Shopping() {
     }
   };
 
-  const openGrocerySelector = () => {
-    setShowGrocerySelector(true);
+  const handleAddToInstacart = () => {
+    setShowInstacartModal(true);
+  };
+
+  const createInstacartList = async (): Promise<{ url?: string; sentItems?: ShoppingItem[] }> => {
+    if (!items || items.length === 0) {
+      throw new Error('No items found in your shopping list');
+    }
+
+    try {
+      setIsCreatingShoppingList(true);
+
+      // Filter items that have recipe IDs and are not checked
+      const itemsWithRecipeIds = items.filter(item => !item.checked && item.recipe_id);
+      console.log('Items with recipe IDs:', itemsWithRecipeIds.length);
+
+      if (itemsWithRecipeIds.length === 0) {
+        throw new Error('No recipe items found in your shopping list');
+      }
+
+      // Get unique recipe IDs
+      const recipeIds = [...new Set(
+        itemsWithRecipeIds.map(item => item.recipe_id)
+      )] as string[];
+
+      console.log('Unique recipe IDs:', recipeIds);
+
+      // Create entries for the shopping list API
+      const entries: ShoppingListEntry[] = recipeIds.map(recipeId => ({
+        quantity: 1, // Default to 1 serving
+        measure: 'http://www.edamam.com/ontologies/edamam.owl#Measure_serving',
+        recipe: `http://www.edamam.com/ontologies/edamam.owl#recipe_${recipeId.replace('recipe_', '')}`
+      }));
+
+      // Call the API to create a shopping list
+      const response = await createShoppingList(entries);
+
+      // Get the shopping cart URL from the response
+      const cartUrl = response.shoppingCartUrl ||
+                     (response._links?.['shopping-cart']?.href);
+
+      if (!cartUrl) {
+        console.warn('No shopping cart URL found in the response');
+      }
+
+      // Return both the URL and the items that were sent
+      return {
+        url: cartUrl,
+        sentItems: itemsWithRecipeIds
+      };
+    } catch (error) {
+      console.error('Error creating Instacart shopping list:', error);
+      throw error;
+    } finally {
+      setIsCreatingShoppingList(false);
+    }
+  };
+
+  const markItemsAsChecked = async (itemIds: string[]) => {
+    try {
+      console.log('Marking items as checked:', itemIds.length);
+
+      // Mark each item as checked
+      for (const id of itemIds) {
+        await toggleItemCheckedApi(id);
+      }
+
+      // Refresh the shopping list
+      await loadShoppingList();
+
+      console.log('Successfully marked items as checked');
+    } catch (error) {
+      console.error('Error marking items as checked:', error);
+      throw error;
+    }
   };
 
   if (loading) {
@@ -135,8 +210,8 @@ export default function Shopping() {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerButton}
-            onPress={openGrocerySelector}
-            accessibilityLabel="Open grocery service selector"
+            onPress={handleAddToInstacart}
+            accessibilityLabel="Order from Instacart"
           >
             <ExternalLink size={20} color="#2A9D8F" />
           </TouchableOpacity>
@@ -214,23 +289,21 @@ export default function Shopping() {
       {items.length > 0 && (
         <TouchableOpacity
           style={styles.groceryButton}
-          onPress={openGrocerySelector}
+          onPress={handleAddToInstacart}
         >
           <Text style={styles.groceryButtonText}>Order from Instacart</Text>
           <ExternalLink size={20} color="#fff" />
         </TouchableOpacity>
       )}
-      {showGrocerySelector && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <GroceryServiceSelector
-              ingredients={items.filter(item => !item.checked).map(item => item.name)}
-              shoppingItems={items.filter(item => !item.checked && item.recipe_id)}
-              onClose={() => setShowGrocerySelector(false)}
-            />
-          </View>
-        </View>
-      )}
+
+      <InstacartModal
+        visible={showInstacartModal}
+        onClose={() => setShowInstacartModal(false)}
+        onConfirm={createInstacartList}
+        onMarkItemsAsChecked={markItemsAsChecked}
+        shoppingItems={items.filter(item => !item.checked)}
+        isLoading={isCreatingShoppingList}
+      />
 
       <ConfirmationDialog
         visible={showClearAllConfirmation}
@@ -393,23 +466,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Regular',
     fontSize: 16,
   },
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  modalContainer: {
-    width: '90%',
-    maxWidth: 500,
-    padding: 0,
-    borderRadius: 12,
-    color: '#666',
-  },
+
 });
 

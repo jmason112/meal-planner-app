@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Clock, Users, Plus, Check, CircleAlert as AlertCircle, Calendar, ExternalLink } from 'lucide-react-native';
+import { ArrowLeft, Clock, Users, Plus, Check, CircleAlert as AlertCircle, Calendar, ExternalLink, ChefHat } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
@@ -9,6 +9,9 @@ import { addToShoppingList } from '@/lib/shopping';
 import { ShoppingListToast } from '@/components/ShoppingListToast';
 import { getRecipeDetails, type Recipe } from '@/lib/edamam';
 import { MealPlanSelectorModal } from '@/components/MealPlanSelectorModal';
+import { CreateMealPlanModal } from '@/components/CreateMealPlanModal';
+import { markMealAsCooked, getCurrentMealPlan } from '@/lib/meal-plans';
+import { checkAndUpdateAchievements } from '@/lib/progress';
 
 export default function RecipeDetail() {
   const router = useRouter();
@@ -19,9 +22,14 @@ export default function RecipeDetail() {
   const [selectedIngredients, setSelectedIngredients] = useState<Record<string, boolean>>({});
   const [showToast, setShowToast] = useState(false);
   const [showMealPlanSelector, setShowMealPlanSelector] = useState(false);
+  const [showCreateMealPlanModal, setShowCreateMealPlanModal] = useState(false);
+  const [currentMealPlan, setCurrentMealPlan] = useState<any>(null);
+  const [isMarkedAsCooked, setIsMarkedAsCooked] = useState(false);
+  const [markingAsCooked, setMarkingAsCooked] = useState(false);
 
   useEffect(() => {
     loadRecipeDetails();
+    loadCurrentMealPlan();
   }, [id]);
 
   const loadRecipeDetails = async () => {
@@ -34,6 +42,23 @@ export default function RecipeDetail() {
       setError(err instanceof Error ? err.message : 'Failed to load recipe');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCurrentMealPlan = async () => {
+    try {
+      const mealPlan = await getCurrentMealPlan();
+      setCurrentMealPlan(mealPlan);
+
+      // Check if this recipe is in the current meal plan and is marked as cooked
+      if (mealPlan && mealPlan.recipes) {
+        const recipeInMealPlan = mealPlan.recipes.find(
+          (r: any) => r.recipe_id === id && r.is_cooked
+        );
+        setIsMarkedAsCooked(!!recipeInMealPlan);
+      }
+    } catch (err) {
+      console.error('Error loading current meal plan:', err);
     }
   };
 
@@ -57,6 +82,44 @@ export default function RecipeDetail() {
       } catch (linkError) {
         console.error('Error opening external link:', linkError);
       }
+    }
+  };
+
+  const handleMarkAsCooked = async () => {
+    if (!currentMealPlan || !recipe || markingAsCooked) return;
+
+    try {
+      setMarkingAsCooked(true);
+
+      // Find this recipe in the current meal plan
+      const recipeInMealPlan = currentMealPlan.recipes?.find(
+        (r: any) => r.recipe_id === id
+      );
+
+      if (recipeInMealPlan) {
+        // Toggle the cooked status
+        await markMealAsCooked(
+          currentMealPlan.id,
+          recipeInMealPlan.recipe_id,
+          recipeInMealPlan.day_index,
+          recipeInMealPlan.meal_type
+        );
+
+        // Update local state
+        setIsMarkedAsCooked(true);
+
+        // Update achievements
+        await checkAndUpdateAchievements();
+      } else {
+        // Recipe is not in the current meal plan
+        setError('This recipe is not in your current meal plan');
+        setTimeout(() => setError(null), 3000);
+      }
+    } catch (err) {
+      console.error('Error marking recipe as cooked:', err);
+      setError('Failed to mark recipe as cooked');
+    } finally {
+      setMarkingAsCooked(false);
     }
   };
 
@@ -251,22 +314,63 @@ export default function RecipeDetail() {
         entering={FadeInDown.delay(400)}
         style={styles.footer}
       >
-        <View style={styles.footerButtons}>
-          <TouchableOpacity
-            style={styles.mealPlanButton}
-            onPress={() => setShowMealPlanSelector(true)}
-          >
-            <Calendar size={20} color="#fff" />
-            <Text style={styles.addButtonText}>Add to Meal Plan</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={addToList}
-          >
-            <Plus size={20} color="#fff" />
-            <Text style={styles.addButtonText}>Add to Shopping List</Text>
-          </TouchableOpacity>
+        <View style={styles.actionButtonsContainer}>
+          {/* Main action buttons */}
+          <View style={styles.mainActionButtons}>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={addToList}
+            >
+              <View style={styles.buttonIconContainer}>
+                <Plus size={20} color="#fff" />
+              </View>
+              <Text style={styles.primaryButtonText}>Add to Shopping List</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Secondary action buttons */}
+          <View style={styles.secondaryActionButtons}>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setShowMealPlanSelector(true)}
+            >
+              <View style={styles.buttonIconContainer}>
+                <Calendar size={18} color="#264653" />
+              </View>
+              <Text style={styles.secondaryButtonText}>Add to Existing Plan</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setShowCreateMealPlanModal(true)}
+            >
+              <View style={styles.buttonIconContainer}>
+                <Calendar size={18} color="#264653" />
+                <Plus size={12} color="#264653" style={styles.plusIcon} />
+              </View>
+              <Text style={styles.secondaryButtonText}>Create New Plan</Text>
+            </TouchableOpacity>
+          </View>
         </View>
+
+        {currentMealPlan && (
+          <TouchableOpacity
+            style={[styles.cookedButton, isMarkedAsCooked && styles.cookedButtonActive]}
+            onPress={handleMarkAsCooked}
+            disabled={markingAsCooked}
+          >
+            {markingAsCooked ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <ChefHat size={20} color={isMarkedAsCooked ? "#FFFFFF" : "#264653"} />
+                <Text style={[styles.cookedButtonText, isMarkedAsCooked && styles.cookedButtonTextActive]}>
+                  {isMarkedAsCooked ? 'Marked as Cooked' : 'Mark as Cooked'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
       </Animated.View>
 
       <ShoppingListToast
@@ -277,6 +381,22 @@ export default function RecipeDetail() {
       {showMealPlanSelector && recipe && (
         <MealPlanSelectorModal
           onClose={() => setShowMealPlanSelector(false)}
+          recipeId={id as string}
+          recipeData={{
+            id: id as string,
+            title: recipe.label,
+            image: recipe.image,
+            time: recipe.totalTime ? `${recipe.totalTime} min` : 'N/A',
+            servings: recipe.yield || 2,
+            calories: Math.round(recipe.calories / (recipe.yield || 1)),
+            rating: 4
+          }}
+        />
+      )}
+
+      {showCreateMealPlanModal && recipe && (
+        <CreateMealPlanModal
+          onClose={() => setShowCreateMealPlanModal(false)}
           recipeId={id as string}
           recipeData={{
             id: id as string,
@@ -463,33 +583,90 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#E9ECEF',
   },
-  footerButtons: {
-    flexDirection: 'row',
-    gap: 12,
+  actionButtonsContainer: {
+    marginBottom: 16,
   },
-  mealPlanButton: {
-    flex: 1,
-    backgroundColor: '#264653',
-    padding: 16,
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+  mainActionButtons: {
+    marginBottom: 12,
   },
-  addButton: {
-    flex: 1,
+  primaryButton: {
     backgroundColor: '#2A9D8F',
     padding: 16,
     borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  primaryButtonText: {
+    fontFamily: 'Inter-SemiBold',
+    fontSize: 16,
+    color: '#fff',
+    marginLeft: 8,
+  },
+  secondaryActionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  secondaryButton: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryButtonText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 14,
+    color: '#264653',
+    marginLeft: 8,
+    textAlign: 'center',
+  },
+  buttonIconContainer: {
+    position: 'relative',
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  plusIcon: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
   },
   addButtonText: {
     fontFamily: 'Inter-SemiBold',
     fontSize: 16,
     color: '#fff',
+  },
+  cookedButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F0F9F8',
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 12,
+    gap: 8,
+  },
+  cookedButtonActive: {
+    backgroundColor: '#2A9D8F',
+  },
+  cookedButtonText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 16,
+    color: '#264653',
+  },
+  cookedButtonTextActive: {
+    color: '#FFFFFF',
   },
 });

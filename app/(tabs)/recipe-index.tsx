@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput, Platform, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput, Platform, Pressable, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search, ChevronRight, Clock, Users, SlidersHorizontal, X as XIcon, Star, ArrowLeft } from 'lucide-react-native';
+import { Search, ChevronRight, Clock, Users, SlidersHorizontal, X as XIcon, Star, ArrowLeft, Calendar, Plus, MoreVertical } from 'lucide-react-native';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import { Recipe, RecipeSearchParams, searchRecipes } from '@/lib/edamam';
+import { CreateMealPlanModal } from '@/components/CreateMealPlanModal';
 
 const CATEGORIES = [
   { id: 'quick', name: 'Quick & Easy', color: '#2A9D8F', image: 'https://images.unsplash.com/photo-1495521821757-a1efb6729352?q=80&w=800&auto=format&fit=crop' },
@@ -240,6 +241,8 @@ export default function RecipeIndex() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [showCreateMealPlanModal, setShowCreateMealPlanModal] = useState(false);
+  const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
   const [filters, setFilters] = useState<FilterState>({
     dietary: [],
     cuisine: [],
@@ -370,6 +373,11 @@ export default function RecipeIndex() {
     // Extract the recipe ID from the URI
     const id = recipeUri.split('#recipe_')[1];
     router.push(`/recipe/${id}`);
+  };
+
+  const handleCreateMealPlan = (recipe: Recipe) => {
+    setSelectedRecipe(recipe);
+    setShowCreateMealPlanModal(true);
   };
 
   const toggleFilters = () => {
@@ -589,32 +597,41 @@ export default function RecipeIndex() {
                         key={recipe.uri}
                         entering={FadeInRight.delay(700 + index * 100)}
                       >
-                        <TouchableOpacity
-                          style={styles.recipeCard}
-                          onPress={() => navigateToRecipe(recipe.uri)}
-                        >
-                          <Image
-                            source={{ uri: recipe.image }}
-                            style={styles.recipeImage}
-                          />
-                          <View style={styles.recipeContent}>
-                            <Text style={styles.recipeName}>{recipe.label}</Text>
-                            <View style={styles.recipeMetaContainer}>
-                              <View style={styles.recipeMeta}>
-                                <Clock size={14} color="#666" />
-                                <Text style={styles.recipeMetaText}>
-                                  {recipe.totalTime > 0 ? `${recipe.totalTime} min` : 'N/A'}
-                                </Text>
-                              </View>
-                              {recipe.yield > 0 && (
+                        <View style={styles.recipeCardWrapper}>
+                          <TouchableOpacity
+                            style={styles.recipeCard}
+                            onPress={() => navigateToRecipe(recipe.uri)}
+                          >
+                            <Image
+                              source={{ uri: recipe.image }}
+                              style={styles.recipeImage}
+                            />
+                            <View style={styles.recipeContent}>
+                              <Text style={styles.recipeName}>{recipe.label}</Text>
+                              <View style={styles.recipeMetaContainer}>
                                 <View style={styles.recipeMeta}>
-                                  <Users size={14} color="#666" />
-                                  <Text style={styles.recipeMetaText}>{Math.round(recipe.yield)} servings</Text>
+                                  <Clock size={14} color="#666" />
+                                  <Text style={styles.recipeMetaText}>
+                                    {recipe.totalTime > 0 ? `${recipe.totalTime} min` : 'N/A'}
+                                  </Text>
                                 </View>
-                              )}
+                                {recipe.yield > 0 && (
+                                  <View style={styles.recipeMeta}>
+                                    <Users size={14} color="#666" />
+                                    <Text style={styles.recipeMetaText}>{Math.round(recipe.yield)} servings</Text>
+                                  </View>
+                                )}
+                              </View>
                             </View>
-                          </View>
-                        </TouchableOpacity>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.createPlanButton}
+                            onPress={() => handleCreateMealPlan(recipe)}
+                          >
+                            <Calendar size={14} color="#fff" />
+                            <Plus size={10} color="#fff" style={styles.plusIcon} />
+                          </TouchableOpacity>
+                        </View>
                       </Animated.View>
                     ))
                   )}
@@ -644,32 +661,41 @@ export default function RecipeIndex() {
                         entering={FadeInDown.delay(900 + index * 100)}
                         style={styles.recommendedCardContainer}
                       >
-                        <TouchableOpacity
-                          style={styles.recommendedCard}
-                          onPress={() => navigateToRecipe(recipe.uri)}
-                        >
-                          <Image
-                            source={{ uri: recipe.image }}
-                            style={styles.recommendedImage}
-                          />
-                          <View style={styles.recommendedContent}>
-                            <Text style={styles.recommendedName}>{recipe.label}</Text>
-                            <View style={styles.recipeMetaContainer}>
-                              <View style={styles.recipeMeta}>
-                                <Clock size={14} color="#666" />
-                                <Text style={styles.recipeMetaText}>
-                                  {recipe.totalTime > 0 ? `${recipe.totalTime} min` : 'N/A'}
-                                </Text>
-                              </View>
-                              {recipe.yield > 0 && (
+                        <View style={styles.recommendedCardWrapper}>
+                          <TouchableOpacity
+                            style={styles.recommendedCard}
+                            onPress={() => navigateToRecipe(recipe.uri)}
+                          >
+                            <Image
+                              source={{ uri: recipe.image }}
+                              style={styles.recommendedImage}
+                            />
+                            <View style={styles.recommendedContent}>
+                              <Text style={styles.recommendedName}>{recipe.label}</Text>
+                              <View style={styles.recipeMetaContainer}>
                                 <View style={styles.recipeMeta}>
-                                  <Users size={14} color="#666" />
-                                  <Text style={styles.recipeMetaText}>{Math.round(recipe.yield)} servings</Text>
+                                  <Clock size={14} color="#666" />
+                                  <Text style={styles.recipeMetaText}>
+                                    {recipe.totalTime > 0 ? `${recipe.totalTime} min` : 'N/A'}
+                                  </Text>
                                 </View>
-                              )}
+                                {recipe.yield > 0 && (
+                                  <View style={styles.recipeMeta}>
+                                    <Users size={14} color="#666" />
+                                    <Text style={styles.recipeMetaText}>{Math.round(recipe.yield)} servings</Text>
+                                  </View>
+                                )}
+                              </View>
                             </View>
-                          </View>
-                        </TouchableOpacity>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.recommendedCreatePlanButton}
+                            onPress={() => handleCreateMealPlan(recipe)}
+                          >
+                            <Calendar size={14} color="#fff" />
+                            <Plus size={10} color="#fff" style={styles.plusIcon} />
+                          </TouchableOpacity>
+                        </View>
                       </Animated.View>
                     ))
                   )}
@@ -693,6 +719,22 @@ export default function RecipeIndex() {
             onApply={handleApplyFilters}
           />
         </>
+      )}
+
+      {showCreateMealPlanModal && selectedRecipe && (
+        <CreateMealPlanModal
+          onClose={() => setShowCreateMealPlanModal(false)}
+          recipeId={selectedRecipe.uri.split('#recipe_')[1]}
+          recipeData={{
+            id: selectedRecipe.uri.split('#recipe_')[1],
+            title: selectedRecipe.label,
+            image: selectedRecipe.image,
+            time: selectedRecipe.totalTime ? `${selectedRecipe.totalTime} min` : 'N/A',
+            servings: selectedRecipe.yield || 2,
+            calories: Math.round(selectedRecipe.calories / (selectedRecipe.yield || 1)),
+            rating: 4
+          }}
+        />
       )}
     </View>
   );
@@ -945,11 +987,15 @@ const styles = StyleSheet.create({
   recipesContainer: {
     marginBottom: 32,
   },
-  recipeCard: {
+  recipeCardWrapper: {
+    position: 'relative',
     width: 200,
+    marginRight: 12,
+  },
+  recipeCard: {
+    width: '100%',
     backgroundColor: '#fff',
     borderRadius: 12,
-    marginRight: 12,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -958,6 +1004,30 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+  createPlanButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#F4A261',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  plusIcon: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
   },
   recipeImage: {
     width: '100%',
@@ -997,6 +1067,10 @@ const styles = StyleSheet.create({
     width: '48%',
     marginBottom: 16,
   },
+  recommendedCardWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
   recommendedCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -1006,8 +1080,25 @@ const styles = StyleSheet.create({
       height: 2,
     },
     shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+  },
+  recommendedCreatePlanButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#F4A261',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
   },
   recommendedImage: {
     width: '100%',

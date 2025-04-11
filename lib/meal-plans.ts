@@ -25,6 +25,7 @@ export interface MealPlanRecipe {
   day_index: number;
   meal_type: string;
   notes: string | null;
+  is_cooked: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -42,6 +43,17 @@ export interface SaveMealPlanParams {
     meal_type: string;
     notes?: string;
   }[];
+}
+
+export interface CreateMealPlanFromRecipeParams {
+  name: string;
+  description?: string;
+  category?: string;
+  recipeId: string;
+  recipeData: any;
+  mealType: string;
+  numDays: number;
+  dayIndices?: number[]; // Optional array of day indices to add the recipe to
 }
 
 export async function saveMealPlan(params: SaveMealPlanParams): Promise<MealPlan> {
@@ -533,4 +545,274 @@ export async function updateMealPlanStatusByDate(): Promise<void> {
   if (upcomingError && upcomingError.code !== 'PGRST116') {
     throw new Error(`Error finding upcoming meal plan: ${upcomingError.message}`);
   }
+}
+
+// Mark a meal as cooked
+export async function markMealAsCooked(mealPlanId: string, recipeId: string, dayIndex: number, mealType: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error('No authenticated user found');
+  }
+
+  // First, verify that this meal plan belongs to the user
+  const { data: mealPlan, error: mealPlanError } = await supabase
+    .from('meal_plans')
+    .select('id')
+    .eq('id', mealPlanId)
+    .eq('user_id', user.id)
+    .single();
+
+  if (mealPlanError) {
+    throw new Error(`Error verifying meal plan ownership: ${mealPlanError.message}`);
+  }
+
+  // Update the meal plan recipe
+  const { error } = await supabase
+    .from('meal_plan_recipes')
+    .update({ is_cooked: true })
+    .eq('meal_plan_id', mealPlanId)
+    .eq('recipe_id', recipeId)
+    .eq('day_index', dayIndex)
+    .eq('meal_type', mealType);
+
+  if (error) {
+    throw new Error(`Error marking meal as cooked: ${error.message}`);
+  }
+}
+
+// Mark a meal as not cooked
+export async function markMealAsNotCooked(mealPlanId: string, recipeId: string, dayIndex: number, mealType: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error('No authenticated user found');
+  }
+
+  // First, verify that this meal plan belongs to the user
+  const { data: mealPlan, error: mealPlanError } = await supabase
+    .from('meal_plans')
+    .select('id')
+    .eq('id', mealPlanId)
+    .eq('user_id', user.id)
+    .single();
+
+  if (mealPlanError) {
+    throw new Error(`Error verifying meal plan ownership: ${mealPlanError.message}`);
+  }
+
+  // Update the meal plan recipe
+  const { error } = await supabase
+    .from('meal_plan_recipes')
+    .update({ is_cooked: false })
+    .eq('meal_plan_id', mealPlanId)
+    .eq('recipe_id', recipeId)
+    .eq('day_index', dayIndex)
+    .eq('meal_type', mealType);
+
+  if (error) {
+    throw new Error(`Error marking meal as not cooked: ${error.message}`);
+  }
+}
+
+// Get cooked meals for a specific date
+export async function getCookedMealsForDate(date: string): Promise<MealPlanRecipe[]> {
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error('No authenticated user found');
+  }
+
+  // Find meal plans that cover this date
+  const { data: mealPlans, error: mealPlansError } = await supabase
+    .from('meal_plans')
+    .select('id')
+    .eq('user_id', user.id)
+    .lte('start_date', date)
+    .gte('end_date', date);
+
+  if (mealPlansError) {
+    throw new Error(`Error finding meal plans for date: ${mealPlansError.message}`);
+  }
+
+  if (!mealPlans || mealPlans.length === 0) {
+    return [];
+  }
+
+  // Get the meal plan IDs
+  const mealPlanIds = mealPlans.map(mp => mp.id);
+
+  // Calculate the day index for this date within each meal plan
+  const dayIndices = await Promise.all(mealPlans.map(async (mp) => {
+    const { data: mealPlan, error: mealPlanError } = await supabase
+      .from('meal_plans')
+      .select('start_date')
+      .eq('id', mp.id)
+      .single();
+
+    if (mealPlanError) {
+      throw new Error(`Error getting meal plan start date: ${mealPlanError.message}`);
+    }
+
+    const startDate = new Date(mealPlan.start_date);
+    const targetDate = new Date(date);
+    const dayDiff = Math.floor((targetDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    return { mealPlanId: mp.id, dayIndex: dayDiff };
+  }));
+
+  // Get all cooked meals for these meal plans and day indices
+  const { data: cookedMeals, error: cookedMealsError } = await supabase
+    .from('meal_plan_recipes')
+    .select('*')
+    .in('meal_plan_id', mealPlanIds)
+    .eq('is_cooked', true)
+    .in('day_index', dayIndices.map(di => di.dayIndex));
+
+  if (cookedMealsError) {
+    throw new Error(`Error getting cooked meals: ${cookedMealsError.message}`);
+  }
+
+  return cookedMeals || [];
+}
+
+/**
+ * Creates a new meal plan from a single recipe
+ * @param params Parameters for creating a meal plan from a recipe
+ * @returns The created meal plan
+ */
+export async function createMealPlanFromRecipe(params: CreateMealPlanFromRecipeParams): Promise<MealPlan> {
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error('No authenticated user found');
+  }
+
+  // Determine the start date for the new meal plan
+  let startDate: string;
+
+  // Get the latest meal plan to determine the next start date
+  const { data: latestPlans, error: latestError } = await supabase
+    .from('meal_plans')
+    .select('end_date')
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+    .order('end_date', { ascending: false })
+    .limit(1);
+
+  if (latestError) {
+    throw new Error(`Error finding latest meal plan: ${latestError.message}`);
+  }
+
+  const today = new Date();
+
+  if (latestPlans && latestPlans.length > 0 && latestPlans[0].end_date) {
+    // If there's an existing meal plan, start the new one the day after it ends
+    const latestEndDate = new Date(latestPlans[0].end_date);
+    latestEndDate.setDate(latestEndDate.getDate() + 1); // Add one day
+    startDate = latestEndDate.toISOString().split('T')[0];
+  } else {
+    // If there's no existing meal plan, start today
+    startDate = today.toISOString().split('T')[0];
+  }
+
+  // Calculate the end date based on the number of days
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + params.numDays - 1); // -1 because the start day counts as day 1
+  const endDateStr = endDate.toISOString().split('T')[0];
+
+  // Check if this would be the current meal plan
+  const todayStr = today.toISOString().split('T')[0];
+  const is_current = startDate <= todayStr && todayStr <= endDateStr;
+
+  // Create the meal plan
+  const { data: mealPlan, error: mealPlanError } = await supabase
+    .from('meal_plans')
+    .insert({
+      user_id: user.id,
+      name: params.name,
+      description: params.description || null,
+      category: params.category || null,
+      tags: [],
+      start_date: startDate,
+      end_date: endDateStr,
+      is_current: is_current,
+      status: 'active'
+    })
+    .select()
+    .single();
+
+  if (mealPlanError) {
+    throw new Error(`Error creating meal plan: ${mealPlanError.message}`);
+  }
+
+  // Determine which days to add the recipe to
+  const dayIndices = params.dayIndices && params.dayIndices.length > 0
+    ? params.dayIndices
+    : [0]; // Default to first day if not specified
+
+  console.log('Creating meal plan with days:', dayIndices);
+
+  // Create recipe entries for each selected day
+  const recipeEntries = dayIndices.map(dayIndex => ({
+    meal_plan_id: mealPlan.id,
+    recipe_id: params.recipeId,
+    recipe_data: params.recipeData,
+    day_index: dayIndex,
+    meal_type: params.mealType,
+    notes: ''
+  }));
+
+  // Add the recipes to the meal plan
+  const { error: recipeError } = await supabase
+    .from('meal_plan_recipes')
+    .insert(recipeEntries);
+
+  if (recipeError) {
+    // If there was an error adding the recipe, delete the meal plan
+    await supabase
+      .from('meal_plans')
+      .delete()
+      .eq('id', mealPlan.id);
+
+    throw new Error(`Error adding recipe to meal plan: ${recipeError.message}`);
+  }
+
+  // If this is the new current meal plan, update other meal plans
+  if (is_current) {
+    await supabase
+      .from('meal_plans')
+      .update({ is_current: false })
+      .eq('user_id', user.id)
+      .neq('id', mealPlan.id);
+  }
+
+  // Fetch the created recipes to ensure we have the correct data
+  const { data: createdRecipes, error: fetchError } = await supabase
+    .from('meal_plan_recipes')
+    .select('*')
+    .eq('meal_plan_id', mealPlan.id);
+
+  if (fetchError) {
+    console.error('Error fetching created recipes:', fetchError.message);
+  }
+
+  console.log('Created recipes:', createdRecipes);
+
+  // Return the created meal plan with all the recipes
+  return {
+    ...mealPlan,
+    recipes: createdRecipes || dayIndices.map(dayIndex => ({
+      id: '', // We don't have the ID yet, but it's not needed for the UI
+      meal_plan_id: mealPlan.id,
+      recipe_id: params.recipeId,
+      recipe_data: params.recipeData,
+      day_index: dayIndex,
+      meal_type: params.mealType,
+      notes: '',
+      is_cooked: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }))
+  };
 }

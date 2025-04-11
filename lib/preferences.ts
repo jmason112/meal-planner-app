@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { ProgressTrackingPreferences } from './progress';
 
 export interface UserPreferences {
   id: string;
@@ -8,6 +9,7 @@ export interface UserPreferences {
   dislikes: string[];
   servings: number;
   meal_reminders: MealReminder[];
+  progress_tracking: ProgressTrackingPreferences;
   created_at: string;
   updated_at: string;
 }
@@ -21,7 +23,7 @@ export interface MealReminder {
 
 export async function getUserPreferences(): Promise<UserPreferences | null> {
   const { data: { user } } = await supabase.auth.getUser();
-  
+
   if (!user) {
     throw new Error('No authenticated user found');
   }
@@ -42,7 +44,7 @@ export async function getUserPreferences(): Promise<UserPreferences | null> {
 
 export async function saveUserPreferences(preferences: Partial<UserPreferences>) {
   const { data: { user } } = await supabase.auth.getUser();
-  
+
   if (!user) {
     throw new Error('No authenticated user found');
   }
@@ -88,15 +90,15 @@ export async function saveUserPreferences(preferences: Partial<UserPreferences>)
 
 export async function updatePreference(key: keyof UserPreferences, value: any) {
   const { data: { user } } = await supabase.auth.getUser();
-  
+
   if (!user) {
     throw new Error('No authenticated user found');
   }
 
   const { data, error } = await supabase
     .from('user_preferences')
-    .update({ 
-      [key]: value, 
+    .update({
+      [key]: value,
       updated_at: new Date().toISOString()
     })
     .eq('user_id', user.id)
@@ -112,7 +114,7 @@ export async function updatePreference(key: keyof UserPreferences, value: any) {
 
 export async function resetPreferences() {
   const { data: { user } } = await supabase.auth.getUser();
-  
+
   if (!user) {
     throw new Error('No authenticated user found');
   }
@@ -123,7 +125,18 @@ export async function resetPreferences() {
     allergies: [],
     dislikes: [],
     servings: 2,
-    meal_reminders: []
+    meal_reminders: [],
+    progress_tracking: {
+      enabled: true,
+      track_breakfast: true,
+      track_lunch: true,
+      track_dinner: true,
+      track_snack: false,
+      track_shopping: true,
+      notifications_enabled: true,
+      daily_goal_notifications: true,
+      achievement_notifications: true
+    }
   };
 
   const { data, error } = await supabase
