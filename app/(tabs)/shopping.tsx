@@ -129,11 +129,16 @@ export default function Shopping() {
       console.log('Unique recipe IDs:', recipeIds);
 
       // Create entries for the shopping list API
-      const entries: ShoppingListEntry[] = recipeIds.map(recipeId => ({
-        quantity: 1, // Default to 1 serving
-        measure: 'http://www.edamam.com/ontologies/edamam.owl#Measure_serving',
-        recipe: `http://www.edamam.com/ontologies/edamam.owl#recipe_${recipeId.replace('recipe_', '')}`
-      }));
+      const entries: ShoppingListEntry[] = recipeIds.map(recipeId => {
+        // Extract the recipe ID, removing any 'recipe_' prefix if present
+        const recipeIdClean = recipeId.replace(/^recipe_/, '');
+
+        return {
+          quantity: 1, // Default to 1 serving
+          measure: 'http://www.edamam.com/ontologies/edamam.owl#Measure_serving',
+          recipe: `http://www.edamam.com/ontologies/edamam.owl#recipe_${recipeIdClean}`
+        };
+      });
 
       // Call the API to create a shopping list
       const response = await createShoppingList(entries);

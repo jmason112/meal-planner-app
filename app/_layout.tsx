@@ -6,6 +6,7 @@ import { Poppins_500Medium, Poppins_600SemiBold } from '@expo-google-fonts/poppi
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { SplashScreen } from 'expo-router';
 import { updateCurrentMealPlan, scheduleMealPlanUpdates } from '@/lib/meal-plan-scheduler';
+import { initializeProfileStorage } from '@/lib/profile';
 
 // Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
@@ -27,14 +28,26 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
-  // Update meal plan status when app starts
+  // Initialize app when fonts are loaded
   useEffect(() => {
     if (fontsLoaded) {
-      // Update the current meal plan based on date
-      updateCurrentMealPlan();
+      // Initialize app components
+      const initializeApp = async () => {
+        try {
+          // Update the current meal plan based on date
+          await updateCurrentMealPlan();
 
-      // Schedule daily updates
-      scheduleMealPlanUpdates();
+          // Schedule daily updates
+          scheduleMealPlanUpdates();
+
+          // Initialize profile storage
+          await initializeProfileStorage();
+        } catch (error) {
+          console.error('Error initializing app:', error);
+        }
+      };
+
+      initializeApp();
     }
   }, [fontsLoaded]);
 

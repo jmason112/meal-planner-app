@@ -6,6 +6,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SaveMealPlanModal } from './SaveMealPlanModal';
 import { InstacartModal } from './InstacartModal';
 import { createShoppingList, ShoppingListEntry } from '@/lib/edamam';
+import { type ShoppingItem } from '@/lib/shopping';
 
 interface Recipe {
   id: string;
@@ -76,28 +77,30 @@ export function MealPlanResults({ days, onClose, onAddToShoppingList }: MealPlan
     setShowInstacartModal(true);
   };
 
-  const createInstacartList = async (): Promise<string | undefined> => {
+  const createInstacartList = async (): Promise<{ url?: string; sentItems?: ShoppingItem[] }> => {
     try {
       setIsCreatingShoppingList(true);
 
-      // Create entries for the shopping list API
-      const entries: ShoppingListEntry[] = days.flatMap(day =>
-        day.meals.map(meal => ({
-          quantity: meal.recipe.servings,
-          measure: 'http://www.edamam.com/ontologies/edamam.owl#Measure_serving',
-          recipe: `http://www.edamam.com/ontologies/edamam.owl#recipe_${meal.recipe.id.replace('recipe_', '')}`
-        }))
-      );
+      // Get unique recipe IDs
+      const recipeIds = [...new Set(
+        days.flatMap(day => day.meals.map(meal => meal.recipe.id))
+      )] as string[];
+
+      console.log('Unique recipe IDs:', recipeIds);
+
+      // Create entries for the shopping list API - EXACTLY like shopping.tsx
+      const entries: ShoppingListEntry[] = recipeIds.map(recipeId => ({
+        quantity: 1, // Default to 1 serving
+        measure: 'http://www.edamam.com/ontologies/edamam.owl#Measure_serving',
+        recipe: `http://www.edamam.com/ontologies/edamam.owl#recipe_${recipeId.replace('recipe_', '')}`
+      }));
 
       // Call the API to create a shopping list
       const response = await createShoppingList(entries);
 
-      // Log the full response to see what we're getting back
-      console.log('Edamam shopping list response:', JSON.stringify(response, null, 2));
-
-      // The shopping cart URL should now be consistently available in response.shoppingCartUrl
-      // thanks to our fix in the createShoppingList function
-      const cartUrl = response.shoppingCartUrl;
+      // Get the shopping cart URL from the response
+      const cartUrl = response.shoppingCartUrl ||
+                     (response._links?.['shopping-cart']?.href);
 
       if (!cartUrl) {
         console.warn('No shopping cart URL found in the response');
@@ -114,7 +117,10 @@ export function MealPlanResults({ days, onClose, onAddToShoppingList }: MealPlan
         console.error('Error adding items to local shopping list from MealPlanResults:', error);
       }
 
-      return cartUrl;
+      return {
+        url: cartUrl,
+        sentItems: [] // No items to mark as checked in this context
+      };
     } catch (error) {
       console.error('Error creating Instacart shopping list:', error);
       throw error;

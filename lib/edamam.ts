@@ -287,11 +287,14 @@ export async function createShoppingList(entries: ShoppingListEntry[]): Promise<
   url.searchParams.append('type', 'public');
   url.searchParams.append('type', 'edamam-generic');
   url.searchParams.append('shopping-cart', 'true');
-  url.searchParams.append('beta', 'true');
+  url.searchParams.append('beta', 'true'); // This is critical for the Instacart integration
 
-  console.log('Shopping list API URL:', url.toString());
+  console.log('Creating shopping list with URL:', url.toString());
 
   try {
+    // Log the request details for debugging
+    console.log('Creating shopping list with entries:', JSON.stringify(entries, null, 2));
+
     const response = await fetch(url.toString(), {
       method: 'POST',
       headers: {
@@ -303,13 +306,22 @@ export async function createShoppingList(entries: ShoppingListEntry[]): Promise<
       body: JSON.stringify({ entries }),
     });
 
+    console.log('Shopping list API response status:', response.status);
+
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}`;
       try {
         const errorData = await response.json();
         errorMessage += `: ${JSON.stringify(errorData)}`;
-      } catch {
+        console.error('Error response body:', JSON.stringify(errorData, null, 2));
+      } catch (parseError) {
         errorMessage += ` - ${response.statusText}`;
+        console.error('Could not parse error response:', parseError);
+        // Try to get the raw text
+        try {
+          const rawText = await response.text();
+          console.error('Raw error response:', rawText);
+        } catch {}
       }
       throw new Error(`Failed to create shopping list: ${errorMessage}`);
     }

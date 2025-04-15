@@ -66,29 +66,66 @@ export async function saveMealPlan(params: SaveMealPlanParams): Promise<MealPlan
   // Automatically determine start and end dates
   let startDate: string;
   let endDate: string;
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
 
-  // Get the latest meal plan to determine the next start date
-  const { data: latestPlans, error: latestError } = await supabase
+  // First, check if there's a meal plan that covers today's date
+  const { data: currentPlans, error: currentError } = await supabase
     .from('meal_plans')
     .select('end_date')
     .eq('user_id', user.id)
     .eq('status', 'active')
+    .lte('start_date', todayStr)
+    .gte('end_date', todayStr)
     .order('end_date', { ascending: false })
     .limit(1);
 
-  if (latestError) {
-    throw new Error(`Error finding latest meal plan: ${latestError.message}`);
+  if (currentError) {
+    throw new Error(`Error finding current meal plan: ${currentError.message}`);
   }
 
-  // If there's a previous plan, start the day after it ends
-  if (latestPlans && latestPlans.length > 0 && latestPlans[0].end_date) {
-    const lastEndDate = new Date(latestPlans[0].end_date);
-    const newStartDate = new Date(lastEndDate);
-    newStartDate.setDate(lastEndDate.getDate() + 1); // Start the day after the last plan ends
+  // If there's a plan that covers today, start the day after it ends
+  if (currentPlans && currentPlans.length > 0 && currentPlans[0].end_date) {
+    const currentEndDate = new Date(currentPlans[0].end_date);
+    const newStartDate = new Date(currentEndDate);
+    newStartDate.setDate(currentEndDate.getDate() + 1); // Start the day after the current plan ends
     startDate = newStartDate.toISOString().split('T')[0];
+    console.log(`Starting new meal plan after current plan ends: ${startDate}`);
   } else {
-    // If no previous plans, start today
-    startDate = new Date().toISOString().split('T')[0];
+    // If no plan covers today, get the latest meal plan to check when it ended
+    const { data: latestPlans, error: latestError } = await supabase
+      .from('meal_plans')
+      .select('end_date')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .order('end_date', { ascending: false })
+      .limit(1);
+
+    if (latestError) {
+      throw new Error(`Error finding latest meal plan: ${latestError.message}`);
+    }
+
+    // If there's a previous plan, check if it ended recently
+    if (latestPlans && latestPlans.length > 0 && latestPlans[0].end_date) {
+      const lastEndDate = new Date(latestPlans[0].end_date);
+      const daysSinceLastPlan = Math.floor((today.getTime() - lastEndDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      // If the last plan ended within the last 2 days, start the day after it ends
+      if (daysSinceLastPlan <= 2) {
+        const newStartDate = new Date(lastEndDate);
+        newStartDate.setDate(lastEndDate.getDate() + 1); // Start the day after the last plan ends
+        startDate = newStartDate.toISOString().split('T')[0];
+        console.log(`Last plan ended recently (${daysSinceLastPlan} days ago), starting new plan after it: ${startDate}`);
+      } else {
+        // If it's been more than 2 days, start today
+        startDate = todayStr;
+        console.log(`Last plan ended ${daysSinceLastPlan} days ago, starting new plan today: ${startDate}`);
+      }
+    } else {
+      // If no previous plans, start today
+      startDate = todayStr;
+      console.log(`No previous plans found, starting new plan today: ${startDate}`);
+    }
   }
 
   // Calculate the number of days in the meal plan based on unique day_index values
@@ -118,22 +155,22 @@ export async function saveMealPlan(params: SaveMealPlanParams): Promise<MealPlan
   console.log(`Date range: ${startDate} to ${endDate} (${daysToAdd + 1} days total)`);
 
   // Determine if this should be the current meal plan based on dates
-  const today = new Date().toISOString().split('T')[0];
+  // Use the todayStr variable we already defined earlier
   let is_current = false;
 
   // If this plan includes today's date, make it current
-  if (startDate <= today && endDate >= today) {
+  if (startDate <= todayStr && endDate >= todayStr) {
     is_current = true;
   }
   // If this plan is in the future and there's no current plan that includes today
-  else if (startDate > today) {
+  else if (startDate > todayStr) {
     const { data: currentDatePlans, error: currentDateError } = await supabase
       .from('meal_plans')
       .select('id')
       .eq('user_id', user.id)
       .eq('status', 'active')
-      .lte('start_date', today)
-      .gte('end_date', today)
+      .lte('start_date', todayStr)
+      .gte('end_date', todayStr)
       .limit(1);
 
     if (currentDateError) {
@@ -146,7 +183,7 @@ export async function saveMealPlan(params: SaveMealPlanParams): Promise<MealPlan
         .eq('user_id', user.id)
         .eq('status', 'active')
         .lt('start_date', startDate)
-        .gt('start_date', today)
+        .gt('start_date', todayStr)
         .limit(1);
 
       if (earlierError) {
@@ -502,11 +539,21 @@ export async function updateMealPlanStatusByDate(): Promise<void> {
   }
 
   const today = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
+  console.log(`Updating meal plan status for date: ${today}`);
+
+  // First, get the currently marked meal plan
+  const { data: currentMarkedPlan, error: currentError } = await supabase
+    .from('meal_plans')
+    .select('id, name, start_date, end_date')
+    .eq('user_id', user.id)
+    .eq('is_current', true)
+    .eq('status', 'active')
+    .single();
 
   // Find the meal plan that covers today's date
   const { data: currentDatePlan, error: dateError } = await supabase
     .from('meal_plans')
-    .select('id')
+    .select('id, name, start_date, end_date')
     .eq('user_id', user.id)
     .eq('status', 'active')
     .lte('start_date', today)
@@ -515,7 +562,23 @@ export async function updateMealPlanStatusByDate(): Promise<void> {
     .limit(1)
     .single();
 
+  // If there's a plan that covers today's date
   if (currentDatePlan) {
+    // Check if it's already the current plan
+    if (currentMarkedPlan && currentMarkedPlan.id === currentDatePlan.id) {
+      console.log(`Plan "${currentDatePlan.name}" (${currentDatePlan.start_date} to ${currentDatePlan.end_date}) is already marked as current`);
+      return;
+    }
+
+    console.log(`Setting plan "${currentDatePlan.name}" (${currentDatePlan.start_date} to ${currentDatePlan.end_date}) as current because it covers today's date`);
+
+    // Set all other plans as not current
+    await supabase
+      .from('meal_plans')
+      .update({ is_current: false })
+      .eq('user_id', user.id)
+      .neq('id', currentDatePlan.id);
+
     // Set this plan as current
     await setCurrentMealPlan(currentDatePlan.id);
     return;
@@ -528,7 +591,7 @@ export async function updateMealPlanStatusByDate(): Promise<void> {
   // If no plan covers today, find the next upcoming meal plan
   const { data: upcomingPlan, error: upcomingError } = await supabase
     .from('meal_plans')
-    .select('id')
+    .select('id, name, start_date, end_date')
     .eq('user_id', user.id)
     .eq('status', 'active')
     .gt('start_date', today)
@@ -537,6 +600,21 @@ export async function updateMealPlanStatusByDate(): Promise<void> {
     .single();
 
   if (upcomingPlan) {
+    // Check if it's already the current plan
+    if (currentMarkedPlan && currentMarkedPlan.id === upcomingPlan.id) {
+      console.log(`Plan "${upcomingPlan.name}" (${upcomingPlan.start_date} to ${upcomingPlan.end_date}) is already marked as current`);
+      return;
+    }
+
+    console.log(`Setting plan "${upcomingPlan.name}" (${upcomingPlan.start_date} to ${upcomingPlan.end_date}) as current because it's the next upcoming plan`);
+
+    // Set all other plans as not current
+    await supabase
+      .from('meal_plans')
+      .update({ is_current: false })
+      .eq('user_id', user.id)
+      .neq('id', upcomingPlan.id);
+
     // Set this plan as current
     await setCurrentMealPlan(upcomingPlan.id);
     return;
@@ -545,6 +623,8 @@ export async function updateMealPlanStatusByDate(): Promise<void> {
   if (upcomingError && upcomingError.code !== 'PGRST116') {
     throw new Error(`Error finding upcoming meal plan: ${upcomingError.message}`);
   }
+
+  console.log('No current or upcoming meal plans found');
 }
 
 // Mark a meal as cooked
@@ -690,30 +770,66 @@ export async function createMealPlanFromRecipe(params: CreateMealPlanFromRecipeP
 
   // Determine the start date for the new meal plan
   let startDate: string;
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
 
-  // Get the latest meal plan to determine the next start date
-  const { data: latestPlans, error: latestError } = await supabase
+  // First, check if there's a meal plan that covers today's date
+  const { data: currentPlans, error: currentError } = await supabase
     .from('meal_plans')
     .select('end_date')
     .eq('user_id', user.id)
     .eq('status', 'active')
+    .lte('start_date', todayStr)
+    .gte('end_date', todayStr)
     .order('end_date', { ascending: false })
     .limit(1);
 
-  if (latestError) {
-    throw new Error(`Error finding latest meal plan: ${latestError.message}`);
+  if (currentError) {
+    throw new Error(`Error finding current meal plan: ${currentError.message}`);
   }
 
-  const today = new Date();
-
-  if (latestPlans && latestPlans.length > 0 && latestPlans[0].end_date) {
-    // If there's an existing meal plan, start the new one the day after it ends
-    const latestEndDate = new Date(latestPlans[0].end_date);
-    latestEndDate.setDate(latestEndDate.getDate() + 1); // Add one day
-    startDate = latestEndDate.toISOString().split('T')[0];
+  // If there's a plan that covers today, start the day after it ends
+  if (currentPlans && currentPlans.length > 0 && currentPlans[0].end_date) {
+    const currentEndDate = new Date(currentPlans[0].end_date);
+    const newStartDate = new Date(currentEndDate);
+    newStartDate.setDate(currentEndDate.getDate() + 1); // Start the day after the current plan ends
+    startDate = newStartDate.toISOString().split('T')[0];
+    console.log(`Starting new meal plan after current plan ends: ${startDate}`);
   } else {
-    // If there's no existing meal plan, start today
-    startDate = today.toISOString().split('T')[0];
+    // If no plan covers today, get the latest meal plan to check when it ended
+    const { data: latestPlans, error: latestError } = await supabase
+      .from('meal_plans')
+      .select('end_date')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .order('end_date', { ascending: false })
+      .limit(1);
+
+    if (latestError) {
+      throw new Error(`Error finding latest meal plan: ${latestError.message}`);
+    }
+
+    // If there's a previous plan, check if it ended recently
+    if (latestPlans && latestPlans.length > 0 && latestPlans[0].end_date) {
+      const lastEndDate = new Date(latestPlans[0].end_date);
+      const daysSinceLastPlan = Math.floor((today.getTime() - lastEndDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      // If the last plan ended within the last 2 days, start the day after it ends
+      if (daysSinceLastPlan <= 2) {
+        const newStartDate = new Date(lastEndDate);
+        newStartDate.setDate(lastEndDate.getDate() + 1); // Start the day after the last plan ends
+        startDate = newStartDate.toISOString().split('T')[0];
+        console.log(`Last plan ended recently (${daysSinceLastPlan} days ago), starting new plan after it: ${startDate}`);
+      } else {
+        // If it's been more than 2 days, start today
+        startDate = todayStr;
+        console.log(`Last plan ended ${daysSinceLastPlan} days ago, starting new plan today: ${startDate}`);
+      }
+    } else {
+      // If no previous plans, start today
+      startDate = todayStr;
+      console.log(`No previous plans found, starting new plan today: ${startDate}`);
+    }
   }
 
   // Calculate the end date based on the number of days
@@ -722,7 +838,7 @@ export async function createMealPlanFromRecipe(params: CreateMealPlanFromRecipeP
   const endDateStr = endDate.toISOString().split('T')[0];
 
   // Check if this would be the current meal plan
-  const todayStr = today.toISOString().split('T')[0];
+  // Using todayStr that was already defined
   const is_current = startDate <= todayStr && todayStr <= endDateStr;
 
   // Create the meal plan

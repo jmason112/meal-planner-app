@@ -7,7 +7,7 @@ import { getMealPlans, updateMealPlan, deleteMealPlan, toggleFavorite, updateMea
 import { getRecipeDetails, createShoppingList, ShoppingListEntry } from '@/lib/edamam';
 import { InstacartModal } from '@/components/InstacartModal';
 import { RecipeSearchModal } from '@/components/RecipeSearchModal';
-import { addToShoppingList, ShoppingItem } from '@/lib/shopping';
+import { addToShoppingList, type ShoppingItem } from '@/lib/shopping';
 
 export default function EditMealPlan() {
   const router = useRouter();
@@ -166,7 +166,7 @@ export default function EditMealPlan() {
     setShowInstacartModal(true);
   };
 
-  const createInstacartList = async (): Promise<string | undefined> => {
+  const createInstacartList = async (): Promise<{ url?: string; sentItems?: ShoppingItem[] }> => {
     if (!mealPlan || !mealPlan.recipes || mealPlan.recipes.length === 0) {
       throw new Error('No recipes found in this meal plan');
     }
@@ -174,17 +174,25 @@ export default function EditMealPlan() {
     try {
       setIsCreatingShoppingList(true);
 
-      // Create entries for the shopping list API
-      const entries: ShoppingListEntry[] = mealPlan.recipes.map(recipe => ({
-        quantity: recipe.recipe_data.servings || 1,
+      // Get unique recipe IDs
+      const recipeIds = [...new Set(
+        mealPlan.recipes.map(recipe => recipe.recipe_id)
+      )] as string[];
+
+      console.log('Unique recipe IDs:', recipeIds);
+
+      // Create entries for the shopping list API - EXACTLY like shopping.tsx
+      const entries: ShoppingListEntry[] = recipeIds.map(recipeId => ({
+        quantity: 1, // Default to 1 serving
         measure: 'http://www.edamam.com/ontologies/edamam.owl#Measure_serving',
-        recipe: `http://www.edamam.com/ontologies/edamam.owl#recipe_${recipe.recipe_id.replace('recipe_', '')}`
+        recipe: `http://www.edamam.com/ontologies/edamam.owl#recipe_${recipeId.replace('recipe_', '')}`
       }));
 
       // Add to local shopping list
+      let shoppingItems: ShoppingItem[] = [];
       try {
         // Extract all ingredients from the meal plan
-        const shoppingItems = [];
+        const tempItems = [];
 
         // For each recipe in the meal plan, add its ingredients to the shopping list
         for (const recipe of mealPlan.recipes) {
@@ -202,17 +210,18 @@ export default function EditMealPlan() {
               checked: false
             }));
 
-            shoppingItems.push(...ingredients);
+            tempItems.push(...ingredients);
           } catch (error) {
             console.error(`Error getting ingredients for ${recipe.recipe_data.title}:`, error);
           }
         }
 
         // Add all items to the shopping list
-        if (shoppingItems.length > 0) {
-          console.log('Adding to local shopping list:', shoppingItems.length, 'items');
-          await addToShoppingList(shoppingItems);
+        if (tempItems.length > 0) {
+          console.log('Adding to local shopping list:', tempItems.length, 'items');
+          await addToShoppingList(tempItems);
           console.log('Successfully added to local shopping list');
+          shoppingItems = tempItems;
         }
       } catch (err) {
         console.error('Error adding to local shopping list:', err);
@@ -229,7 +238,10 @@ export default function EditMealPlan() {
         console.warn('No shopping cart URL found in the response');
       }
 
-      return cartUrl;
+      return {
+        url: cartUrl,
+        sentItems: shoppingItems
+      };
     } catch (error) {
       console.error('Error creating Instacart shopping list:', error);
       throw error;

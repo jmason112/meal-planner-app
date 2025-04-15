@@ -5,6 +5,7 @@ import { ArrowLeft, Loader as Loader2 } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { signUp, signUpSchema, type SignUpForm, signIn } from '@/lib/auth';
 import { saveUserPreferences } from '@/lib/preferences';
+import { createDefaultUserProfile } from '@/lib/profile';
 import { AuthError } from '@/components/AuthError';
 
 export default function SignUp() {
@@ -13,6 +14,7 @@ export default function SignUp() {
     email: '',
     password: '',
     name: '',
+    username: '',
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -21,13 +23,13 @@ export default function SignUp() {
     try {
       setError(null);
       setLoading(true);
-      
+
       // Validate form data
       const validatedData = signUpSchema.parse(form);
-      
+
       // Sign up user
       await signUp(validatedData);
-      
+
       // Automatically sign in the user
       const { user } = await signIn({
         email: validatedData.email,
@@ -65,9 +67,13 @@ export default function SignUp() {
           }
         ]
       });
-      
-      // Redirect to preferences
-      router.push('/preferences');
+
+      // Create user profile
+      await createDefaultUserProfile();
+
+      // Redirect to profile setup
+      router.push('/profile/edit');
+
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message);
@@ -80,7 +86,7 @@ export default function SignUp() {
   };
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
@@ -93,7 +99,7 @@ export default function SignUp() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
       >
@@ -106,7 +112,7 @@ export default function SignUp() {
 
         {error && <AuthError message={error} />}
 
-        <Animated.View 
+        <Animated.View
           entering={FadeInDown.delay(400).springify()}
           style={styles.form}
         >
@@ -120,6 +126,21 @@ export default function SignUp() {
               autoCapitalize="words"
               autoComplete="name"
             />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Username</Text>
+            <TextInput
+              style={styles.input}
+              value={form.username}
+              onChangeText={(text) => setForm(prev => ({ ...prev, username: text.toLowerCase().replace(/\s+/g, '_') }))}
+              placeholder="Choose a unique username"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Text style={styles.hint}>
+              This will be your unique identifier in the app
+            </Text>
           </View>
 
           <View style={styles.inputContainer}>

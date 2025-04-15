@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platform, RefreshControl, ActivityIndicator, Alert } from 'react-native';
 import EmptyMealPlanState from '@/components/EmptyMealPlanState';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Calendar, Search, Plus, Star, Tag as TagIcon, CircleAlert as AlertCircle, Edit } from 'lucide-react-native';
+import { Calendar, Search, Plus, Star, Tag as TagIcon, CircleAlert as AlertCircle, Edit, RefreshCw } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { getMealPlans, type MealPlan } from '@/lib/meal-plans';
+import { updateCurrentMealPlan } from '@/lib/meal-plan-scheduler';
 
 export default function MealPlanner() {
   const router = useRouter();
@@ -75,9 +76,19 @@ export default function MealPlanner() {
     }, [])
   );
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    loadMealPlans();
+    try {
+      // First update the current meal plan status
+      await updateCurrentMealPlan();
+      // Then reload the meal plans
+      await loadMealPlans();
+    } catch (error) {
+      console.error('Error refreshing meal plans:', error);
+      setError('Failed to refresh meal plans');
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
 
   const getMealPlanCardStyle = (plan: MealPlan, index: number) => {
@@ -106,17 +117,29 @@ export default function MealPlanner() {
   };
 
   const renderPlanStatusTag = (plan: MealPlan, index: number) => {
-    // Current plan
-    if (plan.is_current) {
-      return (
-        <View style={styles.currentTag}>
-          <Text style={styles.currentTagText}>Current</Text>
-        </View>
-      );
-    }
-
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
+
+    // Current plan
+    if (plan.is_current) {
+      // Check if this plan actually covers today's date
+      if (plan.start_date && plan.end_date &&
+          plan.start_date <= todayStr && plan.end_date >= todayStr) {
+        return (
+          <View style={styles.currentTag}>
+            <Text style={styles.currentTagText}>Current</Text>
+          </View>
+        );
+      } else {
+        // This plan is marked as current but doesn't cover today
+        return (
+          <View style={styles.currentTag}>
+            <Text style={styles.currentTagText}>Active</Text>
+          </View>
+        );
+      }
+    }
 
     // Future plans
     if (plan.start_date && new Date(plan.start_date) > today) {
@@ -214,7 +237,28 @@ export default function MealPlanner() {
         entering={FadeInDown.delay(200)}
         style={styles.header}
       >
-        <Text style={styles.title}>Meal Plans</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Meal Plans</Text>
+          <TouchableOpacity
+            style={styles.refreshButton}
+            onPress={async () => {
+              try {
+                setLoading(true);
+                await updateCurrentMealPlan();
+                await loadMealPlans();
+                Alert.alert('Success', 'Meal plan status updated successfully');
+              } catch (error) {
+                console.error('Error updating meal plan status:', error);
+                Alert.alert('Error', 'Failed to update meal plan status');
+              } finally {
+                setLoading(false);
+              }
+            }}
+          >
+            <RefreshCw size={20} color="#2A9D8F" />
+            <Text style={styles.refreshButtonText}>Update</Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.searchContainer}>
           <Search size={20} color="#666" style={styles.searchIcon} />
           <TextInput
@@ -376,11 +420,32 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E9ECEF',
   },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   title: {
     fontFamily: 'Poppins-SemiBold',
     fontSize: 28,
     color: '#264653',
-    marginBottom: 16,
+  },
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F7F8',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2A9D8F',
+  },
+  refreshButtonText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 14,
+    color: '#2A9D8F',
+    marginLeft: 6,
   },
   searchContainer: {
     flexDirection: 'row',

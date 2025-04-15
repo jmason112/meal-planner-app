@@ -11,6 +11,9 @@ export const signUpSchema = z.object({
     .regex(/[0-9]/, 'Password must contain at least one number')
     .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
   name: z.string().min(2, 'Name must be at least 2 characters'),
+  username: z.string().min(3, 'Username must be at least 3 characters')
+    .regex(/^[a-z0-9_]+$/, 'Username can only contain lowercase letters, numbers, and underscores')
+    .optional(),
 });
 
 export type SignUpForm = z.infer<typeof signUpSchema>;
@@ -22,13 +25,14 @@ export const signInSchema = z.object({
 
 export type SignInForm = z.infer<typeof signInSchema>;
 
-export async function signUp({ email, password, name }: SignUpForm) {
+export async function signUp({ email, password, name, username }: SignUpForm) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: {
         name,
+        username,
       },
     },
   });

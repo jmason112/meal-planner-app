@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { ChevronRight, Clock, Users, Bookmark, Plus, Coffee, Award, Trophy } from 'lucide-react-native';
-import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
+import { ChevronRight, Clock, Users, Bookmark, Plus, Coffee } from 'lucide-react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase';
-import { getMealPlans, getCurrentMealPlan, getWeekMealPlans } from '@/lib/meal-plans';
-import { getShoppingList } from '@/lib/shopping';
+import { getMealPlans, getCurrentMealPlan, getWeekMealPlans, type MealPlan } from '@/lib/meal-plans';
+import { getShoppingList, type ShoppingItem } from '@/lib/shopping';
 import { checkAndUpdateAchievements } from '@/lib/progress';
+import { getUserProfile, getLevelInfo, type UserProfile, type LevelInfo } from '@/lib/profile';
+import ProfileImage from '@/components/ProfileImage';
 import EmptyHomeState from '@/components/EmptyHomeState';
 import DailyProgress from '@/components/DailyProgress';
 import ProgressStats from '@/components/ProgressStats';
@@ -15,13 +17,15 @@ import ProgressStats from '@/components/ProgressStats';
 export default function Home() {
   const router = useRouter();
   const [userName, setUserName] = useState('there');
-  const [mealPlan, setMealPlan] = useState(null);
-  const [weekMealPlans, setWeekMealPlans] = useState([]);
-  const [selectedDay, setSelectedDay] = useState(new Date().getDay()); // Current day by default
-  const [shoppingItems, setShoppingItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [levelInfo, setLevelInfo] = useState<LevelInfo | null>(null);
+  const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
+  const [weekMealPlans, setWeekMealPlans] = useState<MealPlan[]>([]);
+  const [selectedDay, setSelectedDay] = useState<number>(new Date().getDay()); // Current day by default
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
 
   useEffect(() => {
     loadUserData();
@@ -60,10 +64,22 @@ export default function Home() {
 
   const loadUserData = async () => {
     try {
+      // Get basic user info from auth
       const { data: { user } } = await supabase.auth.getUser();
       if (user?.user_metadata?.name) {
         setUserName(user.user_metadata.name.split(' ')[0]);
       }
+
+      // Get user profile
+      const userProfile = await getUserProfile();
+
+      // No need to verify avatar URL here anymore - ProfileImage component will handle it
+
+      setProfile(userProfile);
+
+      // Get level info
+      const levelData = await getLevelInfo();
+      setLevelInfo(levelData);
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -124,12 +140,12 @@ export default function Home() {
     return 'Good evening';
   };
 
-  const getDayName = (index) => {
+  const getDayName = (index: number): string => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     return days[index];
   };
 
-  const getFormattedDate = (dayIndex) => {
+  const getFormattedDate = (dayIndex: number): string => {
     const today = new Date();
     const currentDayOfWeek = today.getDay();
     const diff = dayIndex - currentDayOfWeek;
@@ -139,7 +155,7 @@ export default function Home() {
     return targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  const getMealsForDay = (dayIndex) => {
+  const getMealsForDay = (dayIndex: number): any[] => {
     // Get the date for the selected day
     const today = new Date();
     const currentDayOfWeek = today.getDay();
@@ -149,7 +165,7 @@ export default function Home() {
     const targetDateStr = targetDate.toISOString().split('T')[0];
 
     // Collect meals from all relevant meal plans for this day
-    let allMeals = [];
+    let allMeals: any[] = [];
 
     weekMealPlans.forEach(plan => {
       // Check if this plan covers the target date
@@ -160,10 +176,10 @@ export default function Home() {
 
         // Calculate the day index within this specific meal plan
         const planStartDate = new Date(plan.start_date);
-        const daysSincePlanStart = Math.floor((targetDate - planStartDate) / (1000 * 60 * 60 * 24));
+        const daysSincePlanStart = Math.floor((targetDate.getTime() - planStartDate.getTime()) / (1000 * 60 * 60 * 24));
 
         // Add meals for this day from this plan
-        const planMeals = plan.recipes.filter(recipe => recipe.day_index === daysSincePlanStart);
+        const planMeals = plan.recipes.filter((recipe: any) => recipe.day_index === daysSincePlanStart);
         allMeals = [...allMeals, ...planMeals];
       }
     });
@@ -171,7 +187,7 @@ export default function Home() {
     return allMeals;
   };
 
-  const getRecentRecipes = () => {
+  const getRecentRecipes = (): any[] => {
     if (!mealPlan || !mealPlan.recipes) return [];
     return mealPlan.recipes.slice(0, 3);
   };
@@ -201,7 +217,17 @@ export default function Home() {
             <Text style={styles.userName}>{userName}</Text>
           </View>
           <TouchableOpacity style={styles.profileButton} onPress={() => router.push('/profile')}>
-            <Image source={{ uri: "https://ui-avatars.com/api/?name=" + userName }} style={styles.profileImage} />
+            <ProfileImage
+              uri={profile?.avatar_url || null}
+              username={profile?.username || userName}
+              size={40}
+              style={styles.profileImage}
+            />
+            {levelInfo && (
+              <View style={styles.levelBadge}>
+                <Text style={styles.levelText}>{levelInfo.currentLevel}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </LinearGradient>
@@ -255,7 +281,7 @@ export default function Home() {
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.recipesScroll}>
-            {getRecentRecipes().map((recipe, index) => (
+            {getRecentRecipes().map((recipe) => (
               <TouchableOpacity
                 key={recipe.id}
                 style={styles.recipeCard}
@@ -286,7 +312,7 @@ export default function Home() {
             <Text style={styles.sectionTitle}>This Week's Plan</Text>
             <TouchableOpacity
               style={styles.viewAllButton}
-              onPress={() => mealPlan ? router.push(`/meal-planner/edit?id=${mealPlan.id}`) : router.push('/meal-planner/create')}
+              onPress={() => mealPlan ? router.push(`/meal-planner/edit?id=${mealPlan?.id}`) : router.push('/meal-planner/create')}
             >
               <Text style={styles.viewAllText}>{mealPlan ? 'Edit plan' : 'Create plan'}</Text>
               <ChevronRight size={16} color="#2A9D8F" />
@@ -309,176 +335,361 @@ export default function Home() {
               </View>
 
               <View style={styles.mealPlanCard}>
-                {getMealsForDay(selectedDay).filter(meal => meal.meal_type === 'breakfast').length > 0 ? (
+                {(() => {
+                  const breakfastMeals = getMealsForDay(selectedDay).filter(meal => meal.meal_type === 'breakfast');
+                  const breakfastCount = breakfastMeals.length;
+
+                  if (breakfastCount > 0) {
+                    return (
+                      <View style={styles.mealPlanItem}>
+                        <View style={styles.mealPlanTime}>
+                          <Text style={styles.mealPlanTimeText}>Breakfast</Text>
+                          <Text style={styles.mealPlanTimeSubtext}>8:00 AM</Text>
+                          {breakfastCount > 1 && (
+                            <View style={styles.mealCountBadge}>
+                              <Text style={styles.mealCountText}>{breakfastCount}</Text>
+                            </View>
+                          )}
+                        </View>
+                        {breakfastCount === 1 ? (
+                          <View style={styles.mealPlanContent}>
+                            <Image
+                              source={{ uri: breakfastMeals[0]?.recipe_data.image }}
+                              style={styles.mealPlanImage}
+                            />
+                            <View style={styles.mealPlanDetails}>
+                              <Text style={styles.mealPlanTitle}>
+                                {breakfastMeals[0]?.recipe_data.title}
+                              </Text>
+                              <View style={styles.mealPlanActions}>
+                                <TouchableOpacity style={styles.mealPlanAction}>
+                                  <Bookmark size={14} color="#2A9D8F" />
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          </View>
+                        ) : (
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.multipleMealsContainer}
+                          >
+                            {breakfastMeals.map((meal, index) => (
+                              <View key={meal.id} style={[styles.mealPlanContent, styles.multipleMealItem]}>
+                                <Image
+                                  source={{ uri: meal.recipe_data.image }}
+                                  style={styles.mealPlanImage}
+                                />
+                                <View style={styles.mealPlanDetails}>
+                                  <Text style={styles.mealPlanTitle}>
+                                    {meal.recipe_data.title}
+                                  </Text>
+                                  <View style={styles.mealPlanActions}>
+                                    <TouchableOpacity style={styles.mealPlanAction}>
+                                      <Bookmark size={14} color="#2A9D8F" />
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
+                                {index < breakfastMeals.length - 1 && (
+                                  <View style={styles.mealIndicator}>
+                                    <ChevronRight size={16} color="#2A9D8F" />
+                                  </View>
+                                )}
+                              </View>
+                            ))}
+                          </ScrollView>
+                        )}
+                      </View>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {(() => {
+                  const breakfastMeals = getMealsForDay(selectedDay).filter(meal => meal.meal_type === 'breakfast');
+                  return breakfastMeals.length === 0 && (
                   <View style={styles.mealPlanItem}>
                     <View style={styles.mealPlanTime}>
                       <Text style={styles.mealPlanTimeText}>Breakfast</Text>
                       <Text style={styles.mealPlanTimeSubtext}>8:00 AM</Text>
                     </View>
                     <View style={styles.mealPlanContent}>
-                      <Image
-                        source={{ uri: getMealsForDay(selectedDay).find(meal => meal.meal_type === 'breakfast')?.recipe_data.image }}
-                        style={styles.mealPlanImage}
-                      />
-                      <View style={styles.mealPlanDetails}>
-                        <Text style={styles.mealPlanTitle}>
-                          {getMealsForDay(selectedDay).find(meal => meal.meal_type === 'breakfast')?.recipe_data.title}
-                        </Text>
-                        <View style={styles.mealPlanActions}>
-                          <TouchableOpacity style={styles.mealPlanAction}>
-                            <Bookmark size={14} color="#2A9D8F" />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={styles.mealPlanItem}>
-                    <View style={styles.mealPlanTime}>
-                      <Text style={styles.mealPlanTimeText}>Breakfast</Text>
-                      <Text style={styles.mealPlanTimeSubtext}>8:00 AM</Text>
-                    </View>
-                    <View style={styles.mealPlanContent}>
                       <TouchableOpacity
                         style={styles.addMealButton}
-                        onPress={() => router.push(`/meal-planner/edit?id=${mealPlan.id}`)}
+                        onPress={() => router.push(`/meal-planner/edit?id=${mealPlan?.id}`)}
                       >
                         <Plus size={20} color="#2A9D8F" />
                       </TouchableOpacity>
                       <Text style={styles.addMealText}>Add a meal</Text>
                     </View>
                   </View>
-                )}
+                  );
+                })()}
+
+                {<View style={styles.divider} />}
+
+                {(() => {
+                  const lunchMeals = getMealsForDay(selectedDay).filter(meal => meal.meal_type === 'lunch');
+                  const lunchCount = lunchMeals.length;
+
+                  if (lunchCount > 0) {
+                    return (
+                      <View style={styles.mealPlanItem}>
+                        <View style={styles.mealPlanTime}>
+                          <Text style={styles.mealPlanTimeText}>Lunch</Text>
+                          <Text style={styles.mealPlanTimeSubtext}>12:30 PM</Text>
+                          {lunchCount > 1 && (
+                            <View style={styles.mealCountBadge}>
+                              <Text style={styles.mealCountText}>{lunchCount}</Text>
+                            </View>
+                          )}
+                        </View>
+                        {lunchCount === 1 ? (
+                          <View style={styles.mealPlanContent}>
+                            <Image
+                              source={{ uri: lunchMeals[0]?.recipe_data.image }}
+                              style={styles.mealPlanImage}
+                            />
+                            <View style={styles.mealPlanDetails}>
+                              <Text style={styles.mealPlanTitle}>
+                                {lunchMeals[0]?.recipe_data.title}
+                              </Text>
+                              <View style={styles.mealPlanActions}>
+                                <TouchableOpacity style={styles.mealPlanAction}>
+                                  <Bookmark size={14} color="#2A9D8F" />
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          </View>
+                        ) : (
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.multipleMealsContainer}
+                          >
+                            {lunchMeals.map((meal, index) => (
+                              <View key={meal.id} style={[styles.mealPlanContent, styles.multipleMealItem]}>
+                                <Image
+                                  source={{ uri: meal.recipe_data.image }}
+                                  style={styles.mealPlanImage}
+                                />
+                                <View style={styles.mealPlanDetails}>
+                                  <Text style={styles.mealPlanTitle}>
+                                    {meal.recipe_data.title}
+                                  </Text>
+                                  <View style={styles.mealPlanActions}>
+                                    <TouchableOpacity style={styles.mealPlanAction}>
+                                      <Bookmark size={14} color="#2A9D8F" />
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
+                                {index < lunchMeals.length - 1 && (
+                                  <View style={styles.mealIndicator}>
+                                    <ChevronRight size={16} color="#2A9D8F" />
+                                  </View>
+                                )}
+                              </View>
+                            ))}
+                          </ScrollView>
+                        )}
+                      </View>
+                    );
+                  }
+                  return (
+                    <View style={styles.mealPlanItem}>
+                      <View style={styles.mealPlanTime}>
+                        <Text style={styles.mealPlanTimeText}>Lunch</Text>
+                        <Text style={styles.mealPlanTimeSubtext}>12:30 PM</Text>
+                      </View>
+                      <View style={styles.mealPlanContent}>
+                        <TouchableOpacity
+                          style={styles.addMealButton}
+                          onPress={() => router.push(`/meal-planner/edit?id=${mealPlan?.id}`)}
+                        >
+                          <Plus size={20} color="#2A9D8F" />
+                        </TouchableOpacity>
+                        <Text style={styles.addMealText}>Add a meal</Text>
+                      </View>
+                    </View>
+                  );
+                })()}
 
                 <View style={styles.divider} />
 
-                {getMealsForDay(selectedDay).filter(meal => meal.meal_type === 'lunch').length > 0 ? (
-                  <View style={styles.mealPlanItem}>
-                    <View style={styles.mealPlanTime}>
-                      <Text style={styles.mealPlanTimeText}>Lunch</Text>
-                      <Text style={styles.mealPlanTimeSubtext}>12:30 PM</Text>
-                    </View>
-                    <View style={styles.mealPlanContent}>
-                      <Image
-                        source={{ uri: getMealsForDay(selectedDay).find(meal => meal.meal_type === 'lunch')?.recipe_data.image }}
-                        style={styles.mealPlanImage}
-                      />
-                      <View style={styles.mealPlanDetails}>
-                        <Text style={styles.mealPlanTitle}>
-                          {getMealsForDay(selectedDay).find(meal => meal.meal_type === 'lunch')?.recipe_data.title}
-                        </Text>
-                        <View style={styles.mealPlanActions}>
-                          <TouchableOpacity style={styles.mealPlanAction}>
-                            <Bookmark size={14} color="#2A9D8F" />
-                          </TouchableOpacity>
+                {(() => {
+                  const dinnerMeals = getMealsForDay(selectedDay).filter(meal => meal.meal_type === 'dinner');
+                  const dinnerCount = dinnerMeals.length;
+
+                  if (dinnerCount > 0) {
+                    return (
+                      <View style={styles.mealPlanItem}>
+                        <View style={styles.mealPlanTime}>
+                          <Text style={styles.mealPlanTimeText}>Dinner</Text>
+                          <Text style={styles.mealPlanTimeSubtext}>7:00 PM</Text>
+                          {dinnerCount > 1 && (
+                            <View style={styles.mealCountBadge}>
+                              <Text style={styles.mealCountText}>{dinnerCount}</Text>
+                            </View>
+                          )}
                         </View>
+                        {dinnerCount === 1 ? (
+                          <View style={styles.mealPlanContent}>
+                            <Image
+                              source={{ uri: dinnerMeals[0]?.recipe_data.image }}
+                              style={styles.mealPlanImage}
+                            />
+                            <View style={styles.mealPlanDetails}>
+                              <Text style={styles.mealPlanTitle}>
+                                {dinnerMeals[0]?.recipe_data.title}
+                              </Text>
+                              <View style={styles.mealPlanActions}>
+                                <TouchableOpacity style={styles.mealPlanAction}>
+                                  <Bookmark size={14} color="#2A9D8F" />
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          </View>
+                        ) : (
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.multipleMealsContainer}
+                          >
+                            {dinnerMeals.map((meal, index) => (
+                              <View key={meal.id} style={[styles.mealPlanContent, styles.multipleMealItem]}>
+                                <Image
+                                  source={{ uri: meal.recipe_data.image }}
+                                  style={styles.mealPlanImage}
+                                />
+                                <View style={styles.mealPlanDetails}>
+                                  <Text style={styles.mealPlanTitle}>
+                                    {meal.recipe_data.title}
+                                  </Text>
+                                  <View style={styles.mealPlanActions}>
+                                    <TouchableOpacity style={styles.mealPlanAction}>
+                                      <Bookmark size={14} color="#2A9D8F" />
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
+                                {index < dinnerMeals.length - 1 && (
+                                  <View style={styles.mealIndicator}>
+                                    <ChevronRight size={16} color="#2A9D8F" />
+                                  </View>
+                                )}
+                              </View>
+                            ))}
+                          </ScrollView>
+                        )}
+                      </View>
+                    );
+                  }
+                  return (
+                    <View style={styles.mealPlanItem}>
+                      <View style={styles.mealPlanTime}>
+                        <Text style={styles.mealPlanTimeText}>Dinner</Text>
+                        <Text style={styles.mealPlanTimeSubtext}>7:00 PM</Text>
+                      </View>
+                      <View style={styles.mealPlanContent}>
+                        <TouchableOpacity
+                          style={styles.addMealButton}
+                          onPress={() => router.push(`/meal-planner/edit?id=${mealPlan?.id}`)}
+                        >
+                          <Plus size={20} color="#2A9D8F" />
+                        </TouchableOpacity>
+                        <Text style={styles.addMealText}>Add a meal</Text>
                       </View>
                     </View>
-                  </View>
-                ) : (
-                  <View style={styles.mealPlanItem}>
-                    <View style={styles.mealPlanTime}>
-                      <Text style={styles.mealPlanTimeText}>Lunch</Text>
-                      <Text style={styles.mealPlanTimeSubtext}>12:30 PM</Text>
-                    </View>
-                    <View style={styles.mealPlanContent}>
-                      <TouchableOpacity
-                        style={styles.addMealButton}
-                        onPress={() => router.push(`/meal-planner/edit?id=${mealPlan.id}`)}
-                      >
-                        <Plus size={20} color="#2A9D8F" />
-                      </TouchableOpacity>
-                      <Text style={styles.addMealText}>Add a meal</Text>
-                    </View>
-                  </View>
-                )}
+                  );
+                })()}
 
                 <View style={styles.divider} />
 
-                {getMealsForDay(selectedDay).filter(meal => meal.meal_type === 'dinner').length > 0 ? (
-                  <View style={styles.mealPlanItem}>
-                    <View style={styles.mealPlanTime}>
-                      <Text style={styles.mealPlanTimeText}>Dinner</Text>
-                      <Text style={styles.mealPlanTimeSubtext}>7:00 PM</Text>
-                    </View>
-                    <View style={styles.mealPlanContent}>
-                      <Image
-                        source={{ uri: getMealsForDay(selectedDay).find(meal => meal.meal_type === 'dinner')?.recipe_data.image }}
-                        style={styles.mealPlanImage}
-                      />
-                      <View style={styles.mealPlanDetails}>
-                        <Text style={styles.mealPlanTitle}>
-                          {getMealsForDay(selectedDay).find(meal => meal.meal_type === 'dinner')?.recipe_data.title}
-                        </Text>
-                        <View style={styles.mealPlanActions}>
-                          <TouchableOpacity style={styles.mealPlanAction}>
-                            <Bookmark size={14} color="#2A9D8F" />
-                          </TouchableOpacity>
+                {(() => {
+                  const snackMeals = getMealsForDay(selectedDay).filter(meal => meal.meal_type === 'snack');
+                  const snackCount = snackMeals.length;
+
+                  if (snackCount > 0) {
+                    return (
+                      <View style={styles.mealPlanItem}>
+                        <View style={styles.mealPlanTime}>
+                          <Text style={styles.mealPlanTimeText}>Snack</Text>
+                          <Text style={styles.mealPlanTimeSubtext}>4:00 PM</Text>
+                          {snackCount > 1 && (
+                            <View style={styles.mealCountBadge}>
+                              <Text style={styles.mealCountText}>{snackCount}</Text>
+                            </View>
+                          )}
                         </View>
+                        {snackCount === 1 ? (
+                          <View style={styles.mealPlanContent}>
+                            <Image
+                              source={{ uri: snackMeals[0]?.recipe_data.image }}
+                              style={styles.mealPlanImage}
+                            />
+                            <View style={styles.mealPlanDetails}>
+                              <Text style={styles.mealPlanTitle}>
+                                {snackMeals[0]?.recipe_data.title}
+                              </Text>
+                              <View style={styles.mealPlanActions}>
+                                <TouchableOpacity style={styles.mealPlanAction}>
+                                  <Bookmark size={14} color="#2A9D8F" />
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          </View>
+                        ) : (
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.multipleMealsContainer}
+                          >
+                            {snackMeals.map((meal, index) => (
+                              <View key={meal.id} style={[styles.mealPlanContent, styles.multipleMealItem]}>
+                                <Image
+                                  source={{ uri: meal.recipe_data.image }}
+                                  style={styles.mealPlanImage}
+                                />
+                                <View style={styles.mealPlanDetails}>
+                                  <Text style={styles.mealPlanTitle}>
+                                    {meal.recipe_data.title}
+                                  </Text>
+                                  <View style={styles.mealPlanActions}>
+                                    <TouchableOpacity style={styles.mealPlanAction}>
+                                      <Bookmark size={14} color="#2A9D8F" />
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
+                                {index < snackMeals.length - 1 && (
+                                  <View style={styles.mealIndicator}>
+                                    <ChevronRight size={16} color="#2A9D8F" />
+                                  </View>
+                                )}
+                              </View>
+                            ))}
+                          </ScrollView>
+                        )}
+                      </View>
+                    );
+                  }
+                  return (
+                    <View style={styles.mealPlanItem}>
+                      <View style={styles.mealPlanTime}>
+                        <Text style={styles.mealPlanTimeText}>Snack</Text>
+                        <Text style={styles.mealPlanTimeSubtext}>4:00 PM</Text>
+                      </View>
+                      <View style={styles.mealPlanContent}>
+                        <TouchableOpacity
+                          style={styles.addMealButton}
+                          onPress={() => router.push(`/meal-planner/edit?id=${mealPlan?.id}`)}
+                        >
+                          <Coffee size={20} color="#2A9D8F" />
+                        </TouchableOpacity>
+                        <Text style={styles.addMealText}>Add a snack</Text>
                       </View>
                     </View>
-                  </View>
-                ) : (
-                  <View style={styles.mealPlanItem}>
-                    <View style={styles.mealPlanTime}>
-                      <Text style={styles.mealPlanTimeText}>Dinner</Text>
-                      <Text style={styles.mealPlanTimeSubtext}>7:00 PM</Text>
-                    </View>
-                    <View style={styles.mealPlanContent}>
-                      <TouchableOpacity
-                        style={styles.addMealButton}
-                        onPress={() => router.push(`/meal-planner/edit?id=${mealPlan.id}`)}
-                      >
-                        <Plus size={20} color="#2A9D8F" />
-                      </TouchableOpacity>
-                      <Text style={styles.addMealText}>Add a meal</Text>
-                    </View>
-                  </View>
-                )}
-
-                <View style={styles.divider} />
-
-                {getMealsForDay(selectedDay).filter(meal => meal.meal_type === 'snack').length > 0 ? (
-                  <View style={styles.mealPlanItem}>
-                    <View style={styles.mealPlanTime}>
-                      <Text style={styles.mealPlanTimeText}>Snack</Text>
-                      <Text style={styles.mealPlanTimeSubtext}>4:00 PM</Text>
-                    </View>
-                    <View style={styles.mealPlanContent}>
-                      <Image
-                        source={{ uri: getMealsForDay(selectedDay).find(meal => meal.meal_type === 'snack')?.recipe_data.image }}
-                        style={styles.mealPlanImage}
-                      />
-                      <View style={styles.mealPlanDetails}>
-                        <Text style={styles.mealPlanTitle}>
-                          {getMealsForDay(selectedDay).find(meal => meal.meal_type === 'snack')?.recipe_data.title}
-                        </Text>
-                        <View style={styles.mealPlanActions}>
-                          <TouchableOpacity style={styles.mealPlanAction}>
-                            <Bookmark size={14} color="#2A9D8F" />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={styles.mealPlanItem}>
-                    <View style={styles.mealPlanTime}>
-                      <Text style={styles.mealPlanTimeText}>Snack</Text>
-                      <Text style={styles.mealPlanTimeSubtext}>4:00 PM</Text>
-                    </View>
-                    <View style={styles.mealPlanContent}>
-                      <TouchableOpacity
-                        style={styles.addMealButton}
-                        onPress={() => router.push(`/meal-planner/edit?id=${mealPlan.id}`)}
-                      >
-                        <Coffee size={20} color="#2A9D8F" />
-                      </TouchableOpacity>
-                      <Text style={styles.addMealText}>Add a snack</Text>
-                    </View>
-                  </View>
-                )}
-              </View>
+                  );
+                })()
+              }</View>
             </>
           ) : (
             <TouchableOpacity
@@ -560,16 +771,36 @@ const styles = StyleSheet.create({
     fontFamily: "Inter-Bold",
   },
   profileButton: {
+    position: "relative",
     width: 40,
     height: 40,
     borderRadius: 20,
-    overflow: "hidden",
+    overflow: "visible",
+  },
+  profileImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 2,
     borderColor: "#FFFFFF",
   },
-  profileImage: {
-    width: "100%",
-    height: "100%",
+  levelBadge: {
+    position: "absolute",
+    bottom: -5,
+    right: -5,
+    backgroundColor: "#E9C46A",
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+  },
+  levelText: {
+    fontFamily: "Inter-Bold",
+    fontSize: 10,
+    color: "#264653",
   },
   scrollView: {
     flex: 1,
@@ -822,5 +1053,45 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter-Medium",
     color: "#F4A261",
+  },
+  // New styles for multiple meals
+  mealCountBadge: {
+    backgroundColor: "#2A9D8F",
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  mealCountText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontFamily: "Inter-Bold",
+  },
+  multipleMealsContainer: {
+    flexGrow: 0,
+    maxHeight: 120,
+  },
+  multipleMealItem: {
+    marginRight: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E9ECEF",
+    paddingRight: 8,
+  },
+  mealIndicator: {
+    position: "absolute",
+    right: -4,
+    top: "50%",
+    marginTop: -12,
+    backgroundColor: "#F1F9F9",
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#E9ECEF",
   },
 });

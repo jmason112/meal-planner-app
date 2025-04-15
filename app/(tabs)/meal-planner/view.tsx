@@ -6,7 +6,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { getMealPlans, toggleFavorite, setCurrentMealPlan, markMealAsCooked, markMealAsNotCooked, type MealPlan } from '@/lib/meal-plans';
 import { InstacartModal } from '@/components/InstacartModal';
 import { createShoppingList, ShoppingListEntry, getRecipeDetails } from '@/lib/edamam';
-import { addToShoppingList, ShoppingItem, toggleItemChecked as toggleItemCheckedApi } from '@/lib/shopping';
+import { addToShoppingList, type ShoppingItem, toggleItemChecked as toggleItemCheckedApi } from '@/lib/shopping';
 import { checkAndUpdateAchievements } from '@/lib/progress';
 import { supabase } from '@/lib/supabase';
 
@@ -140,11 +140,18 @@ export default function ViewMealPlan() {
     try {
       setIsCreatingShoppingList(true);
 
-      // Create entries for the shopping list API
-      const entries: ShoppingListEntry[] = mealPlan.recipes.map(recipe => ({
-        quantity: recipe.recipe_data.servings || 1,
+      // Get unique recipe IDs
+      const recipeIds = [...new Set(
+        mealPlan.recipes.map(recipe => recipe.recipe_id)
+      )] as string[];
+
+      console.log('Unique recipe IDs:', recipeIds);
+
+      // Create entries for the shopping list API - EXACTLY like shopping.tsx
+      const entries: ShoppingListEntry[] = recipeIds.map(recipeId => ({
+        quantity: 1, // Default to 1 serving
         measure: 'http://www.edamam.com/ontologies/edamam.owl#Measure_serving',
-        recipe: `http://www.edamam.com/ontologies/edamam.owl#recipe_${recipe.recipe_id.replace('recipe_', '')}`
+        recipe: `http://www.edamam.com/ontologies/edamam.owl#recipe_${recipeId.replace('recipe_', '')}`
       }));
 
       // Add to local shopping list
